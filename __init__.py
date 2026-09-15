@@ -8,8 +8,9 @@ provider against https://api.meta.ai/v1.
 
 Resolution order: an explicitly configured ``MUSE_CODE_SUB_TOKEN`` wins;
 otherwise a fresh per-process fetch from omp. Any failure is a silent
-miss (provider simply shows as unconfigured). Secret material is never
-logged. Set ``HERMES_MUSE_CODE_SUB_AUTO=0`` to disable the auto-fetch.
+miss (provider simply shows as unconfigured); misses are debug-logged
+without secret material. Set ``HERMES_MUSE_CODE_SUB_AUTO=0`` to disable
+the auto-fetch.
 
 The Hermes imports are guarded: outside the Hermes runtime (pytest
 collection, linters) the module stays importable and registers nothing.
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 ENV_VAR = "MUSE_CODE_SUB_TOKEN"
 _OPT_OUT = "HERMES_MUSE_CODE_SUB_AUTO"
-_OMP_TIMEOUT_SECS = 25
+_OMP_TIMEOUT_SECS = 10
 
 try:
     from agent.reasoning_effort import META_AI_EFFORTS, clamp_effort
@@ -43,6 +44,7 @@ def _fetch_omp_subscription_key() -> str:
         (b for b in ("omp", "omp.exe", "omp.cmd") if shutil.which(b)), ""
     )
     if not binary:
+        logger.debug("omp binary not found on PATH; %s unconfigured", ENV_VAR)
         return ""
     try:
         startupinfo = None
@@ -56,18 +58,25 @@ def _fetch_omp_subscription_key() -> str:
             timeout=_OMP_TIMEOUT_SECS,
             startupinfo=startupinfo,
         )
-    except Exception:
+    except Exception as exc:
+        logger.debug("omp token muse-code failed: %s", type(exc).__name__)
         return ""
     if proc.returncode != 0:
+        logger.debug("omp token muse-code exited with %s", proc.returncode)
         return ""
     try:
         blob = json.loads(proc.stdout.strip())
     except Exception:
+        logger.debug("omp token muse-code output is not JSON")
         return ""
     if not isinstance(blob, dict):
+        logger.debug("omp token muse-code output has no credential mapping")
         return ""
     key = blob.get("apiKey", "")
-    return key.strip() if isinstance(key, str) else ""
+    if not isinstance(key, str) or not key.strip():
+        logger.debug("omp token muse-code output has no apiKey field")
+        return ""
+    return key.strip()
 
 
 def _ensure_subscription_key() -> None:
@@ -83,6 +92,9 @@ def _ensure_subscription_key() -> None:
         os.environ[ENV_VAR] = key
 
 
+_ensure_subscription_key()
+
+
 def register(ctx) -> None:
     """PluginManager entry point (also required by `hermes plugins validate`).
 
@@ -94,10 +106,11 @@ def register(ctx) -> None:
 
 
 if _HERMES_AVAILABLE:
-
+    # Intentional parity copy of the bundled `meta-ai` provider profile: the
+    # wire quirks below (Responses API, reasoning_effort mapping, vision
+    # limits) must stay in sync with it; do not "simplify" them away.
     class MuseCodeSubscriptionProfile(ProviderProfile):
-        """Meta Model API via the Muse Code subscription (reasoning quirks
-        mirror the bundled ``meta-ai`` provider profile)."""
+        """Meta Model API via the Muse Code subscription."""
 
         _NON_CHAT_PREFIXES = ("muse-image-", "muse-voice-")
 

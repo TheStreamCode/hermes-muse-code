@@ -65,7 +65,9 @@ apps, so reusing their login is the only stable path.
   a JSON blob. Re-login: `omp auth-broker login muse-code`.
 - **401 from the API mid-session** — force an `omp` refresh
   (`omp token muse-code --force-refresh`) and restart the session.
-- **No `omp` on PATH** — the plugin silently skips; install `omp` first.
+- **Long-lived gateway workers** — the key is resolved once per process:
+  `hermes chat` always gets a fresh one, but restart gateway workers after
+  an `omp` credential rotation.
 
 ## Contributing
 

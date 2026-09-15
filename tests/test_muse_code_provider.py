@@ -179,3 +179,44 @@ def test_register_entry_point_is_probe_safe():
     assert callable(getattr(module, "register", None))
     module.register(object())
     assert os.environ["MUSE_CODE_SUB_TOKEN"] == "pinned"
+
+def _stub_base(profile):
+    """The stubbed Hermes base class (super() target of the profile)."""
+    return type(profile).__mro__[1]
+
+
+def test_fetch_models_filters_non_chat():
+    module, registered = _load_plugin()
+    profile = registered["muse-code"]
+    live = [
+        "muse-spark-1.3",
+        "muse-spark-1.2-contributor",
+        "muse-image-1.0",
+        "muse-voice-transcribe-1.0",
+    ]
+    with patch.object(_stub_base(profile), "fetch_models", return_value=live):
+        assert profile.fetch_models(api_key="k") == [
+            "muse-spark-1.3",
+            "muse-spark-1.2-contributor",
+        ]
+    with patch.object(_stub_base(profile), "fetch_models", return_value=None):
+        assert profile.fetch_models(api_key="k") is None
+
+
+def test_no_secret_material_in_logs(caplog):
+    import logging
+
+    module, _ = _load_plugin()
+    blob = json.dumps(
+        {"apiKey": "LLM|sentinel-secret", "oauthAccessToken": "dca-x"}
+    )
+    with (
+        caplog.at_level(logging.DEBUG, logger=module.logger.name),
+        patch.object(module.shutil, "which", return_value="omp"),
+        patch.object(
+            module.subprocess, "run", return_value=_Proc(0, blob)
+        ),
+    ):
+        assert module._fetch_omp_subscription_key() == "LLM|sentinel-secret"
+    assert "LLM|sentinel-secret" not in caplog.text
+    assert "dca-x" not in caplog.text

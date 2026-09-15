@@ -171,3 +171,11 @@ def test_importable_without_hermes_runtime():
     assert module._fetch_omp_subscription_key() == "" or isinstance(
         module._fetch_omp_subscription_key(), str
     )
+
+def test_register_entry_point_is_probe_safe():
+    """`hermes plugins validate` requires register() and runs it in a bare
+    interpreter: it must exist, take any ctx, and never raise."""
+    module, _ = _load_plugin(env={"MUSE_CODE_SUB_TOKEN": "pinned"})
+    assert callable(getattr(module, "register", None))
+    module.register(object())
+    assert os.environ["MUSE_CODE_SUB_TOKEN"] == "pinned"

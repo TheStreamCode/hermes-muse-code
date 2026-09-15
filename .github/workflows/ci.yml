@@ -12,10 +12,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - run: pip install pytest
       - run: python -m pytest -q
 
   validate:
     runs-on: ubuntu-latest
+    # The official action pip-installs hermes-agent from git, which its own
+    # setup.py build guard refuses (pip/PyPI are unsupported distribution
+    # methods upstream). Keep attempting (self-heals if upstream fixes the
+    # action) but don't fail the build over it.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: NousResearch/hermes-agent/.github/actions/plugin-validate@main

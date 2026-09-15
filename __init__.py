@@ -83,7 +83,14 @@ def _ensure_subscription_key() -> None:
         os.environ[ENV_VAR] = key
 
 
-_ensure_subscription_key()
+def register(ctx) -> None:
+    """PluginManager entry point (also required by `hermes plugins validate`).
+
+    Provider registration already happened at import; re-run the key ensure
+    so a login that arrived after import is picked up. Stdlib-only, so the
+    admission probe can run it in a bare interpreter.
+    """
+    _ensure_subscription_key()
 
 
 if _HERMES_AVAILABLE:

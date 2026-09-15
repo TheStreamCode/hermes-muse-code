@@ -1,0 +1,13 @@
+name: muse-code-subscription
+kind: model-provider
+version: 0.1.0
+description: Muse Spark in Hermes billed to the local Muse Code monthly login (via omp, no API key)
+author: TheStreamCode
+license: MIT
+homepage: https://github.com/TheStreamCode/hermes-muse-code
+tags: [meta, muse-spark, subscription]
+requires_hermes: ">=0.21.3"
+external_dependencies:
+  - name: omp
+    check: omp --version
+    install: Install the omp CLI, then run `omp auth-broker login muse-code`

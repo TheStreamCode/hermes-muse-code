@@ -1,16 +1,18 @@
 """Muse Code subscription provider — Muse Spark billed to the monthly sub.
 
-Reuses the local ``omp`` Muse Code login instead of a pay-as-you-go API
-key. On import it shells out to ``omp token muse-code --raw`` (omp owns
-OAuth + refresh), extracts the subscription-bound ``apiKey`` field, and
-exposes it through ``MUSE_CODE_SUB_TOKEN`` as a regular ``api_key``
-provider against https://api.meta.ai/v1.
+No third-party CLI required. Authentication is a Meta device-code login
+(performed once via ``muse_code_login.py``): the device flow mints a
+stable, account-bound inference key that this provider reads from a local
+credential cache. The flow parameters are compatible with the published
+behavior of oh-my-pi (MIT-licensed; see NOTICE).
 
 Resolution order: an explicitly configured ``MUSE_CODE_SUB_TOKEN`` wins;
-otherwise a fresh per-process fetch from omp. Any failure is a silent
+otherwise the cached key from the login step. Any failure is a silent
 miss (provider simply shows as unconfigured); misses are debug-logged
-without secret material. Set ``HERMES_MUSE_CODE_SUB_AUTO=0`` to disable
-the auto-fetch.
+without secret material.
+
+Credential cache: ``$HERMES_HOME/muse-code-sub.json`` (override with
+``MUSE_CODE_SUB_CREDENTIALS``).
 
 The Hermes imports are guarded: outside the Hermes runtime (pytest
 collection, linters) the module stays importable and registers nothing.
@@ -19,14 +21,12 @@ collection, linters) the module stays importable and registers nothing.
 import json
 import logging
 import os
-import shutil
-import subprocess
 
 logger = logging.getLogger(__name__)
 
 ENV_VAR = "MUSE_CODE_SUB_TOKEN"
-_OPT_OUT = "HERMES_MUSE_CODE_SUB_AUTO"
-_OMP_TIMEOUT_SECS = 10
+CREDENTIALS_ENV_VAR = "MUSE_CODE_SUB_CREDENTIALS"
+CREDENTIALS_FILENAME = "muse-code-sub.json"
 
 try:
     from agent.reasoning_effort import META_AI_EFFORTS, clamp_effort
@@ -38,58 +38,44 @@ else:
     _HERMES_AVAILABLE = True
 
 
-def _fetch_omp_subscription_key() -> str:
-    """Return the subscription-bound inference key from the omp login, or ""."""
-    binary = next(
-        (b for b in ("omp", "omp.exe", "omp.cmd") if shutil.which(b)), ""
+def default_credentials_path() -> str:
+    """Location of the device-login credential cache."""
+    override = os.getenv(CREDENTIALS_ENV_VAR, "").strip()
+    if override:
+        return override
+    home = os.getenv("HERMES_HOME", "").strip() or os.path.join(
+        os.path.expanduser("~"), ".hermes"
     )
-    if not binary:
-        logger.debug("omp binary not found on PATH; %s unconfigured", ENV_VAR)
-        return ""
+    return os.path.join(home, CREDENTIALS_FILENAME)
+
+
+def read_cached_key(path: str | None = None) -> str:
+    """Return the cached subscription key, or "" when absent/unusable."""
     try:
-        startupinfo = None
-        if os.name == "nt":  # hide the helper's console window
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        proc = subprocess.run(
-            [binary, "token", "muse-code", "--raw"],
-            capture_output=True,
-            text=True,
-            timeout=_OMP_TIMEOUT_SECS,
-            startupinfo=startupinfo,
-        )
-    except Exception as exc:
-        logger.debug("omp token muse-code failed: %s", type(exc).__name__)
-        return ""
-    if proc.returncode != 0:
-        logger.debug("omp token muse-code exited with %s", proc.returncode)
-        return ""
-    try:
-        blob = json.loads(proc.stdout.strip())
+        with open(path or default_credentials_path(), encoding="utf-8") as fh:
+            blob = json.load(fh)
     except Exception:
-        logger.debug("omp token muse-code output is not JSON")
         return ""
     if not isinstance(blob, dict):
-        logger.debug("omp token muse-code output has no credential mapping")
         return ""
     key = blob.get("apiKey", "")
-    if not isinstance(key, str) or not key.strip():
-        logger.debug("omp token muse-code output has no apiKey field")
-        return ""
-    return key.strip()
+    return key.strip() if isinstance(key, str) and key.strip() else ""
 
 
 def _ensure_subscription_key() -> None:
     if os.getenv(ENV_VAR, "").strip():
         return  # explicit configuration keeps priority
-    if os.getenv(_OPT_OUT, "1") == "0":
-        return
     try:
-        key = _fetch_omp_subscription_key()
+        key = read_cached_key()
     except Exception:
         return
     if key:
         os.environ[ENV_VAR] = key
+    else:
+        logger.debug(
+            "no %s and no usable credential cache; run muse_code_login.py",
+            ENV_VAR,
+        )
 
 
 _ensure_subscription_key()
@@ -98,8 +84,8 @@ _ensure_subscription_key()
 def register(ctx) -> None:
     """PluginManager entry point (also required by `hermes plugins validate`).
 
-    Provider registration already happened at import; re-run the key ensure
-    so a login that arrived after import is picked up. Stdlib-only, so the
+    Provider registration already happened at import; re-read the cache so
+    a login that completed after import is picked up. Stdlib-only, so the
     admission probe can run it in a bare interpreter.
     """
     _ensure_subscription_key()
@@ -151,7 +137,7 @@ if _HERMES_AVAILABLE:
     muse_code = MuseCodeSubscriptionProfile(
         name="muse-code",
         display_name="Muse Code (subscription)",
-        description="Muse Spark billed to the local Muse Code monthly login (via omp)",
+        description="Muse Spark billed to the local Muse Code monthly login",
         signup_url="https://developer.meta.com/ai/",
         env_vars=(ENV_VAR,),
         base_url="https://api.meta.ai/v1",

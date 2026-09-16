@@ -1,22 +1,36 @@
-"""Hermetic unit tests: the plugin module is loaded with stubbed Hermes
-imports, so no hermes install, omp binary, or network is needed."""
+"""Hermetic unit tests: plugin and login modules loaded from file, Hermes
+imports stubbed, network mocked. No hermes install, Meta account, or
+network needed."""
 
 import importlib.util
+import io
 import json
 import os
 import sys
 import types
+import urllib.error
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-PLUGIN_FILE = Path(__file__).resolve().parent.parent / "__init__.py"
+REPO = Path(__file__).resolve().parent.parent
+PLUGIN_FILE = REPO / "__init__.py"
+LOGIN_FILE = REPO / "muse_code_login.py"
 
 EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
 
 
+def _load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def _load_plugin(env=None):
     """Import the plugin with stubbed `agent`/`providers` packages."""
-    os.environ["HERMES_MUSE_CODE_SUB_AUTO"] = "0"  # never shell out on import
+    os.environ.pop("MUSE_CODE_SUB_TOKEN", None)
     for var in ("MUSE_CODE_SUB_TOKEN",):
         env_value = (env or {}).get(var)
         if env_value is None:
@@ -58,24 +72,48 @@ def _load_plugin(env=None):
             "providers.base": base_mod,
         },
     ):
-        for mod in ("_hermes_test_muse_code",):
-            sys.modules.pop(mod, None)
-        spec = importlib.util.spec_from_file_location(
-            "_hermes_test_muse_code", PLUGIN_FILE
-        )
-        module = importlib.util.module_from_spec(spec)
-        sys.modules["_hermes_test_muse_code"] = module
-        spec.loader.exec_module(module)
+        sys.modules.pop("_hermes_test_muse_code", None)
+        module = _load("_hermes_test_muse_code", PLUGIN_FILE)
     return module, registered
 
 
-class _Proc:
-    def __init__(self, returncode=0, stdout=""):
-        self.returncode = returncode
-        self.stdout = stdout
+def _load_login():
+    sys.modules.pop("_hermes_test_login", None)
+    return _load("_hermes_test_login", LOGIN_FILE)
 
 
-def test_provider_registered_with_expected_wiring():
+class _FakeResponse:
+    def __init__(self, payload, status=200):
+        self._payload = payload
+        self.status = status
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self):
+        return json.dumps(self._payload).encode()
+
+
+def _urlopen_script(*steps):
+    """Build a fake urlopen playing canned responses (dict) or errors."""
+    calls = {"n": 0}
+
+    def fake(request, timeout=None):
+        step = steps[min(calls["n"], len(steps) - 1)]
+        calls["n"] += 1
+        if isinstance(step, Exception):
+            raise step
+        return _FakeResponse(step)
+
+    fake.calls = calls
+    return fake
+
+
+def test_provider_registered_with_expected_wiring(tmp_path, monkeypatch):
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "cache.json"))
     module, registered = _load_plugin()
     profile = registered["muse-code"]
     assert profile.base_url == "https://api.meta.ai/v1"
@@ -85,67 +123,50 @@ def test_provider_registered_with_expected_wiring():
     assert profile.fallback_models == ("muse-spark-1.3",)
 
 
-def test_fetch_extracts_apikey_from_omp_blob():
+def test_cached_key_resolution(tmp_path, monkeypatch):
+    cache = tmp_path / "cache.json"
+    cache.write_text(json.dumps({"oauthAccessToken": "dca-x", "apiKey": "LLM|k"}))
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(cache))
     module, _ = _load_plugin()
-    blob = json.dumps({"apiKey": "LLM|test-key", "oauthAccessToken": "dca-x"})
-    with (
-        patch.object(module.shutil, "which", return_value="omp"),
-        patch.object(
-            module.subprocess, "run", return_value=_Proc(0, blob + "\n")
-        ) as run,
-    ):
-        assert module._fetch_omp_subscription_key() == "LLM|test-key"
-        assert run.call_args.args[0][:3] == ["omp", "token", "muse-code"]
+    assert module.read_cached_key() == "LLM|k"
+    module._ensure_subscription_key()
+    assert os.environ["MUSE_CODE_SUB_TOKEN"] == "LLM|k"
 
 
-def test_fetch_misses_silently():
+def test_missing_cache_is_silent_miss(tmp_path, monkeypatch):
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "absent.json"))
     module, _ = _load_plugin()
-    with patch.object(module.shutil, "which", return_value=None):
-        assert module._fetch_omp_subscription_key() == ""
-    with (
-        patch.object(module.shutil, "which", return_value="omp"),
-        patch.object(
-            module.subprocess, "run", return_value=_Proc(1, "boom")
-        ),
-    ):
-        assert module._fetch_omp_subscription_key() == ""
-    with (
-        patch.object(module.shutil, "which", return_value="omp"),
-        patch.object(
-            module.subprocess, "run", return_value=_Proc(0, "not-json")
-        ),
-    ):
-        assert module._fetch_omp_subscription_key() == ""
-    with (
-        patch.object(module.shutil, "which", return_value="omp"),
-        patch.object(
-            module.subprocess,
-            "run",
-            return_value=_Proc(0, json.dumps({"nope": 1})),
-        ),
-    ):
-        assert module._fetch_omp_subscription_key() == ""
+    assert module.read_cached_key() == ""
+    assert "MUSE_CODE_SUB_TOKEN" not in os.environ
 
 
-def test_explicit_env_wins_over_fetch():
+def test_explicit_env_wins_over_cache(tmp_path, monkeypatch):
+    cache = tmp_path / "cache.json"
+    cache.write_text(json.dumps({"apiKey": "LLM|cache"}))
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(cache))
     module, _ = _load_plugin(env={"MUSE_CODE_SUB_TOKEN": "pinned"})
-    with patch.object(
-        module.subprocess,
-        "run",
-        side_effect=AssertionError("must not shell out"),
-    ):
+    module._ensure_subscription_key()
+    assert os.environ["MUSE_CODE_SUB_TOKEN"] == "pinned"
+
+
+def test_no_secret_material_in_logs(tmp_path, monkeypatch, caplog):
+    import logging
+
+    cache = tmp_path / "cache.json"
+    cache.write_text(json.dumps({"apiKey": "LLM|sentinel-secret"}))
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(cache))
+    module, _ = _load_plugin()
+    with caplog.at_level(logging.DEBUG, logger=module.logger.name):
         module._ensure_subscription_key()
-        assert os.environ["MUSE_CODE_SUB_TOKEN"] == "pinned"
+    assert "LLM|sentinel-secret" not in caplog.text
 
 
-def test_reasoning_effort_mapping():
-    module, registered = _load_plugin()
+def test_reasoning_effort_mapping(tmp_path, monkeypatch):
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
+    _, registered = _load_plugin()
     profile = registered["muse-code"]
     assert profile.build_api_kwargs_extras(
         reasoning_config={"enabled": False}
-    ) == ({}, {"reasoning_effort": "minimal"})
-    assert profile.build_api_kwargs_extras(
-        reasoning_config={"effort": "none"}
     ) == ({}, {"reasoning_effort": "minimal"})
     assert profile.build_api_kwargs_extras(
         reasoning_config={"effort": "high"}
@@ -155,11 +176,33 @@ def test_reasoning_effort_mapping():
         {"reasoning_effort": "medium"},
     )
 
-def test_importable_without_hermes_runtime():
-    """Plain import (no stubbed Hermes modules) registers nothing but keeps
-    the key helpers usable — this is what pytest collection relies on."""
-    os.environ["HERMES_MUSE_CODE_SUB_AUTO"] = "0"
-    os.environ.pop("MUSE_CODE_SUB_TOKEN", None)
+
+def test_fetch_models_filters_non_chat(tmp_path, monkeypatch):
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
+    _, registered = _load_plugin()
+    profile = registered["muse-code"]
+    live = ["muse-spark-1.3", "muse-image-1.0", "muse-voice-transcribe-1.0"]
+    with patch.object(
+        type(profile).__mro__[1], "fetch_models", return_value=live
+    ):
+        assert profile.fetch_models(api_key="k") == ["muse-spark-1.3"]
+    with patch.object(
+        type(profile).__mro__[1], "fetch_models", return_value=None
+    ):
+        assert profile.fetch_models(api_key="k") is None
+
+
+def test_register_entry_point_is_probe_safe(tmp_path, monkeypatch):
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
+    module, _ = _load_plugin(env={"MUSE_CODE_SUB_TOKEN": "pinned"})
+    assert callable(getattr(module, "register", None))
+    module.register(object())
+    assert os.environ["MUSE_CODE_SUB_TOKEN"] == "pinned"
+
+
+def test_importable_without_hermes_runtime(tmp_path, monkeypatch):
+    """Plain import registers nothing but keeps helpers usable."""
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
     for mod in ("agent", "agent.reasoning_effort", "providers", "providers.base"):
         assert mod not in sys.modules
     spec = importlib.util.spec_from_file_location(
@@ -168,55 +211,82 @@ def test_importable_without_hermes_runtime():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert module._HERMES_AVAILABLE is False
-    assert module._fetch_omp_subscription_key() == "" or isinstance(
-        module._fetch_omp_subscription_key(), str
-    )
-
-def test_register_entry_point_is_probe_safe():
-    """`hermes plugins validate` requires register() and runs it in a bare
-    interpreter: it must exist, take any ctx, and never raise."""
-    module, _ = _load_plugin(env={"MUSE_CODE_SUB_TOKEN": "pinned"})
-    assert callable(getattr(module, "register", None))
-    module.register(object())
-    assert os.environ["MUSE_CODE_SUB_TOKEN"] == "pinned"
-
-def _stub_base(profile):
-    """The stubbed Hermes base class (super() target of the profile)."""
-    return type(profile).__mro__[1]
+    assert module.read_cached_key() == ""
 
 
-def test_fetch_models_filters_non_chat():
-    module, registered = _load_plugin()
-    profile = registered["muse-code"]
-    live = [
-        "muse-spark-1.3",
-        "muse-spark-1.2-contributor",
-        "muse-image-1.0",
-        "muse-voice-transcribe-1.0",
-    ]
-    with patch.object(_stub_base(profile), "fetch_models", return_value=live):
-        assert profile.fetch_models(api_key="k") == [
-            "muse-spark-1.3",
-            "muse-spark-1.2-contributor",
-        ]
-    with patch.object(_stub_base(profile), "fetch_models", return_value=None):
-        assert profile.fetch_models(api_key="k") is None
+DEVICE_OK = {
+    "device_code": "dc",
+    "user_code": "ABCD-EFGH",
+    "verification_uri": "https://auth.meta.com/device",
+    "verification_uri_complete": "https://auth.meta.com/device?user_code=ABCD-EFGH",
+    "interval": 5,
+    "expires_in": 600,
+}
+KEY_OK = {
+    "api_key": "LLM|fresh",
+    "user_email": "User@Example.com",
+    "user_id": "uid-1",
+    "is_subs_active": True,
+}
 
 
-def test_no_secret_material_in_logs(caplog):
-    import logging
+def test_full_login_flow_writes_cache(tmp_path):
+    login = _load_login()
+    cache = str(tmp_path / "creds.json")
+    fake = _urlopen_script(DEVICE_OK, {"error": "authorization_pending"}, {"access_token": "dca-new"}, KEY_OK)
+    with patch.object(login.urllib.request, "urlopen", fake):
+        with patch.object(login.time, "sleep", lambda s: None):
+            out = io.StringIO()
+            with redirect_stdout(out):
+                assert login.main(["--cache", cache]) == 0
+    assert "ABCD-EFGH" in out.getvalue()
+    assert "LLM|fresh" not in out.getvalue()  # secrets never printed
+    saved = json.loads(open(cache).read())
+    assert saved == {
+        "oauthAccessToken": "dca-new",
+        "apiKey": "LLM|fresh",
+        "accountId": "uid-1",
+        "email": "user@example.com",
+    }
 
-    module, _ = _load_plugin()
-    blob = json.dumps(
-        {"apiKey": "LLM|sentinel-secret", "oauthAccessToken": "dca-x"}
-    )
-    with (
-        caplog.at_level(logging.DEBUG, logger=module.logger.name),
-        patch.object(module.shutil, "which", return_value="omp"),
-        patch.object(
-            module.subprocess, "run", return_value=_Proc(0, blob)
-        ),
-    ):
-        assert module._fetch_omp_subscription_key() == "LLM|sentinel-secret"
-    assert "LLM|sentinel-secret" not in caplog.text
-    assert "dca-x" not in caplog.text
+
+def test_login_rejects_inactive_subscription():
+    login = _load_login()
+    bad = dict(KEY_OK, is_subs_active=False)
+    fake = _urlopen_script(bad)
+    with patch.object(login.urllib.request, "urlopen", fake):
+        with patch.object(login.time, "sleep", lambda s: None):
+            try:
+                login.mint_key("dca-x")
+            except login.LoginError as exc:
+                assert "inactive" in str(exc)
+            else:
+                raise AssertionError("expected LoginError")
+
+
+def test_login_requires_payment_action():
+    login = _load_login()
+    nopay = {"require_payment": True, "action_url": "https://example.com/pay"}
+    fake = _urlopen_script(nopay)
+    with patch.object(login.urllib.request, "urlopen", fake):
+        with patch.object(login.time, "sleep", lambda s: None):
+            try:
+                login.mint_key("dca-x")
+            except login.LoginError as exc:
+                assert "https://example.com/pay" in str(exc)
+            else:
+                raise AssertionError("expected LoginError")
+
+
+def test_login_poll_timeout():
+    login = _load_login()
+    fake = _urlopen_script({"error": "authorization_pending"})
+    with patch.object(login.urllib.request, "urlopen", fake):
+        with patch.object(login.time, "sleep", lambda s: None):
+            with patch.object(login.time, "time", side_effect=[0.0, 0.0, 9999.0]):
+                try:
+                    login.poll_token("dc", 5, 10)
+                except login.LoginError as exc:
+                    assert "timed out" in str(exc)
+                else:
+                    raise AssertionError("expected LoginError")

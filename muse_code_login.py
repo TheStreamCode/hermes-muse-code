@@ -57,6 +57,38 @@ def _post_form(url, params):
         raise LoginError(f"request to {url} failed: {exc}")
 
 
+def _post_form_lenient(url, params):
+    """POST form params; return (body, status) without raising on HTTP errors.
+
+    The token endpoint answers pending/slow_down polls with HTTP errors as
+    part of the normal flow: callers classify instead of catching.
+    """
+    try:
+        request = urllib.request.Request(
+            url,
+            data=urllib.parse.urlencode(params).encode(),
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/x-www-form-urlencoded",
+                "x-api-version": API_VERSION,
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECS) as response:
+            status = response.status
+            try:
+                return json.load(response), status
+            except Exception:
+                return None, status
+    except urllib.error.HTTPError as exc:
+        try:
+            return json.loads(exc.read().decode("utf-8", "replace")), exc.code
+        except Exception:
+            return None, exc.code
+    except Exception as exc:
+        raise LoginError(f"request to {url} failed: {exc}")
+
+
 def _post_json(url, payload, bearer):
     """POST a JSON payload with bearer auth; return the decoded body."""
     try:
@@ -102,7 +134,7 @@ def poll_token(device_code, interval_seconds, expires_in_seconds):
     deadline = time.time() + float(expires_in_seconds or 600)
     slow_downs = 0
     while time.time() < deadline:
-        body, _ = _post_form(
+        body, _ = _post_form_lenient(
             TOKEN_URL,
             {
                 "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
@@ -111,7 +143,7 @@ def poll_token(device_code, interval_seconds, expires_in_seconds):
             },
         )
         if not isinstance(body, dict):
-            raise LoginError("token endpoint returned an unexpected response")
+            body = {"error": "unreadable token response"}
         error = body.get("error")
         if not error:
             access = body.get("access_token")

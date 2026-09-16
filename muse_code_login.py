@@ -153,7 +153,7 @@ def poll_token(device_code, interval_seconds, expires_in_seconds):
         if error == "slow_down":
             slow_downs += 1
             interval = max(MIN_POLL_INTERVAL_SECS, interval + SLOW_DOWN_INCREMENT_SECS)
-        elif error not in ("authorization_pending",):
+        elif error != "authorization_pending":
             raise LoginError(f"login failed: {error}")
         remaining = deadline - time.time()
         if remaining <= 0:

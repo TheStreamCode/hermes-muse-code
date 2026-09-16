@@ -138,15 +138,18 @@ if _HERMES_AVAILABLE:
         name="muse-code",
         display_name="Muse Code (subscription)",
         description="Muse Spark billed to the local Muse Code monthly login",
-        signup_url="https://developer.meta.com/ai/",
+        signup_url="https://github.com/TheStreamCode/hermes-muse-code#login-once",
         env_vars=(ENV_VAR,),
-        base_url="https://api.meta.ai/v1",
+        base_url=os.getenv("META_BASE_URL", "").strip() or "https://api.meta.ai/v1",
         auth_type="api_key",
         # Responses API engages Muse prompt caching; same wire as meta-ai.
         api_mode="codex_responses",
         supports_vision=True,
         supports_vision_tool_messages=False,
         default_max_tokens=16384,
+        # default_aux_model intentionally unset (= main model): the bundled
+        # profile's contributor-tier default would silently opt background
+        # compression into data training.
         fallback_models=("muse-spark-1.3",),
     )
 

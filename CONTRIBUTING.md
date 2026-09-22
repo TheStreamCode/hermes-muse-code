@@ -12,8 +12,10 @@ Run the unit suite before opening a pull request:
 python -m pytest -q
 ```
 
-CI also runs the upstream `plugin-validate` step in non-blocking mode (the
-upstream pip guard rejects it; the failure reason is documented in `ci.yml`).
+CI also runs the local plugin validator (`.github/scripts/validate-plugin.py`),
+which mirrors the upstream `plugin-validate` admission checks without installing
+hermes-agent (the upstream action's pip install is rejected by hermes-agent's own
+setup.py guard, and the action has no last-good version to pin; see `ci.yml`).
 
 ## Pull requests
 

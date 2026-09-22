@@ -22,15 +22,20 @@ jobs:
 
   validate:
     runs-on: ubuntu-latest
-    # The official action pip-installs hermes-agent from git, which its own
-    # setup.py build guard refuses (pip/PyPI are unsupported distribution
-    # methods upstream). Keep attempting (self-heals if upstream fixes the
-    # action) but don't fail the build over it.
-    continue-on-error: true
+    # Local equivalent of the upstream plugin-validate action. The official
+    # action pip-installs hermes-agent from git, which hermes-agent's own
+    # setup.py build guard rejects (pip/PyPI are unsupported distribution
+    # methods upstream), and the action has a single revision in history so
+    # there is no last-good version to pin. This job runs the same admission
+    # checks (manifest schema, stdlib-only imports, capability probe) via a
+    # checked-in script instead, with no hermes-agent install and no
+    # dependency on an upstream fix.
     steps:
       # pinned: actions/checkout@v4
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      # pinned: NousResearch/hermes-agent@main (2026-09-15)
-      - uses: NousResearch/hermes-agent/.github/actions/plugin-validate@69fd61b0efbe2bf7f412714ed8c35e40dfddc534
+      # pinned: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
-          path: .
+          python-version: "3.11"
+      - run: pip install pyyaml
+      - run: python .github/scripts/validate-plugin.py --path .

@@ -5,7 +5,7 @@
 ## Validation
 
 - [ ] `python -m pytest -q`
-- [ ] Upstream `plugin-validate` outcome noted (CI runs it non-blocking)
+- [ ] `python .github/scripts/validate-plugin.py --path .` (local plugin validator, runs in CI)
 
 ## Compatibility and Security
 

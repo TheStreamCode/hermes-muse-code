@@ -1,0 +1,53 @@
+name: Compatibility report
+description: Report a compatibility problem with a Hermes or Muse change
+title: "[Compatibility]: "
+labels: ["compatibility"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form when the provider stops matching a released Hermes version or a documented Muse subscription behavior.
+        Remove subscription keys, credentials, private prompts, and account data before submitting.
+  - type: dropdown
+    id: affected-system
+    attributes:
+      label: Affected system
+      options:
+        - Hermes Agent
+        - Muse subscription login
+        - Both or unclear
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version or commit
+      placeholder: v0.2.0 or a commit SHA
+    validations:
+      required: true
+  - type: input
+    id: upstream-version
+    attributes:
+      label: Hermes or Muse version reference
+      description: Provide a release, commit, dated behavior change, or authoritative link.
+    validations:
+      required: true
+  - type: textarea
+    id: observed-behavior
+    attributes:
+      label: Observed compatibility problem
+      description: Explain the regression and provide minimal reproduction steps.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized evidence
+      description: Add relevant logs or links after removing sensitive data.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Sensitive-data check
+      options:
+        - label: I removed subscription keys, credentials, private prompts, and account data.
+          required: true

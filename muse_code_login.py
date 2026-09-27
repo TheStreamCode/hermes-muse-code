@@ -192,11 +192,23 @@ def mint_key(access_token, onboard=True):
 
 
 def write_cache(credentials, path):
-    """Persist credentials with owner-only permissions where supported."""
+    """Persist credentials with owner-only permissions where supported.
+
+    Retention minimization: only apiKey/accountId/email touch disk. The
+    OAuth access token has unknown broader scope and nothing reads it back,
+    so it must never be persisted — sanitize at the sink, whatever the
+    caller passes in.
+    """
+    cached = {
+        "apiKey": credentials.get("apiKey"),
+        "accountId": credentials.get("accountId"),
+    }
+    if credentials.get("email"):
+        cached["email"] = credentials["email"]
     directory = os.path.dirname(os.path.abspath(path))
     os.makedirs(directory, exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
-        json.dump(credentials, fh, indent=2)
+        json.dump(cached, fh, indent=2)
     try:
         os.chmod(path, 0o600)
     except Exception:

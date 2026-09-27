@@ -241,9 +241,11 @@ def test_full_login_flow_writes_cache(tmp_path):
                 assert login.main(["--cache", cache]) == 0
     assert "ABCD-EFGH" in out.getvalue()
     assert "LLM|fresh" not in out.getvalue()  # secrets never printed
-    saved = json.loads(open(cache).read())
+    raw = open(cache).read()
+    assert "oauthAccessToken" not in raw  # never persisted
+    assert "dca-new" not in raw
+    saved = json.loads(raw)
     assert saved == {
-        "oauthAccessToken": "dca-new",
         "apiKey": "LLM|fresh",
         "accountId": "uid-1",
         "email": "user@example.com",

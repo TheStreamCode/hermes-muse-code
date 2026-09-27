@@ -32,6 +32,9 @@ python "$env:HERMES_HOME\plugins\muse-code-subscription\muse_code_login.py"
 
 This mints a stable, account-bound inference key and caches it locally
 (`$HERMES_HOME/muse-code-sub.json`, owner-only permissions where supported).
+The cache stores exactly `apiKey`, `accountId`, and `email` — the OAuth
+access token from the login flow is kept in memory only and never written
+to disk.
 The key is never printed. Re-run only if access is revoked (401) — the mint
 endpoint is aggressively rate-limited, so the plugin never re-mints on its own.
 

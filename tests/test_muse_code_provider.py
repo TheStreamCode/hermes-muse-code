@@ -177,15 +177,24 @@ def test_reasoning_effort_mapping(tmp_path, monkeypatch):
     )
 
 
-def test_fetch_models_filters_non_chat(tmp_path, monkeypatch):
+def test_fetch_models_admits_only_muse_spark(tmp_path, monkeypatch):
     monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
     _, registered = _load_plugin()
     profile = registered["muse-code"]
-    live = ["muse-spark-1.3", "muse-image-1.0", "muse-voice-transcribe-1.0"]
+    live = [
+        "muse-spark-1.3",
+        "muse-spark-1.2-contributor",
+        "sam-3.1",
+        "muse-image-1.0",
+        "muse-voice-transcribe-1.0",
+    ]
     with patch.object(
         type(profile).__mro__[1], "fetch_models", return_value=live
     ):
-        assert profile.fetch_models(api_key="k") == ["muse-spark-1.3"]
+        assert profile.fetch_models(api_key="k") == [
+            "muse-spark-1.3",
+            "muse-spark-1.2-contributor",
+        ]
     with patch.object(
         type(profile).__mro__[1], "fetch_models", return_value=None
     ):

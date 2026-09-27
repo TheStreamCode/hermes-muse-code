@@ -98,7 +98,11 @@ if _HERMES_AVAILABLE:
     class MuseCodeSubscriptionProfile(ProviderProfile):
         """Meta Model API via the Muse Code subscription."""
 
-        _NON_CHAT_PREFIXES = ("muse-image-", "muse-voice-")
+        # Allowlist: this provider serves the Muse Spark chat family. The live
+        # endpoint also returns other families (sam-*, muse-image-*,
+        # muse-voice-*) that are not usable as chat models — a denylist
+        # would leak the next such family, so only muse-spark-* is admitted.
+        _CHAT_FAMILY_PREFIX = "muse-spark-"
 
         def fetch_models(
             self,
@@ -112,11 +116,7 @@ if _HERMES_AVAILABLE:
             )
             if live is None:
                 return None
-            return [
-                m
-                for m in live
-                if not any(m.startswith(p) for p in self._NON_CHAT_PREFIXES)
-            ]
+            return [m for m in live if m.startswith(self._CHAT_FAMILY_PREFIX)]
 
         def build_api_kwargs_extras(
             self,

@@ -2,7 +2,8 @@
 
 [![ci](https://github.com/TheStreamCode/hermes-muse-code/actions/workflows/ci.yml/badge.svg)](https://github.com/TheStreamCode/hermes-muse-code/actions/workflows/ci.yml)
 
-Use Meta **Muse Spark** in [Hermes Agent](https://github.com/NousResearch/hermes-agent)
+Use Meta **Muse Spark, Muse Wonder, and Muse Wonder Full** in
+[Hermes Agent](https://github.com/NousResearch/hermes-agent)
 billed to your **Muse Code monthly subscription** — no pay-as-you-go API key required.
 
 Hermes' built-in Meta provider only accepts explicit API keys, so subscribers
@@ -44,8 +45,36 @@ endpoint is aggressively rate-limited, so the plugin never re-mints on its own.
 hermes chat -m muse-spark-1.3 --provider muse-code
 ```
 
-Or pick provider `muse-code` from `hermes model`. Serves the Muse Spark
-family (`muse-spark-1.1` / `1.2` / `1.3`, including `-contributor` tiers).
+Or pick provider `muse-code` from `hermes model`. Model discovery admits the
+Muse Spark family (`muse-spark-1.1` / `1.2` / `1.3`, including `-contributor`
+tiers) and these exact [official Muse Wonder IDs](https://dev.meta.ai/models/muse-wonder):
+
+- `muse-wonder-1.0`
+- `muse-wonder-full-1.0`
+
+Only models returned by your account's live catalogue are listed. This plugin
+filters discovery; it does not add Wonder or Full when absent, grant access,
+or change the existing Spark fallback. Other Wonder versions or suffixed IDs
+are not admitted without separate verification.
+
+### Wonder access and Contributor mode
+
+Wonder Full requires an eligible Muse Code subscription (currently Power Usage
+or Maximum Usage); selecting its ID does not bypass subscription entitlement.
+See Meta's [model availability](https://dev.meta.ai/models/muse-wonder) and
+[subscription documentation](https://dev.meta.ai/docs/muse-code/subscriptions).
+
+Contributor mode is an account-level Muse Code setting. Meta documents that
+subscriptions default to Contributor mode, which permits use of your content
+for training in exchange for more usage; you can turn it off in Muse Code
+settings. Wonder and Wonder Full are available in either mode on eligible
+plans. An unsuffixed model ID is **not** evidence that Contributor mode is off.
+This plugin neither reads nor changes that setting.
+
+Reasoning effort is separate from model selection: `max` on Wonder does **not**
+select Wonder Full. Full must be selected explicitly as `muse-wonder-full-1.0`
+and be available to your account. The existing Responses API transport and
+reasoning mapping are unchanged; see Meta's [reasoning documentation](https://dev.meta.ai/docs/reasoning).
 
 ## Configuration
 

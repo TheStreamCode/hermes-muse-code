@@ -1,4 +1,4 @@
-"""Muse Code subscription provider — Muse Spark billed to the monthly sub.
+"""Muse Code subscription provider — Muse chat models billed to the monthly sub.
 
 No third-party CLI required. Authentication is a Meta device-code login
 (performed once via ``muse_code_login.py``): the device flow mints a
@@ -98,11 +98,11 @@ if _HERMES_AVAILABLE:
     class MuseCodeSubscriptionProfile(ProviderProfile):
         """Meta Model API via the Muse Code subscription."""
 
-        # Allowlist: this provider serves the Muse Spark chat family. The live
-        # endpoint also returns other families (sam-*, muse-image-*,
-        # muse-voice-*) that are not usable as chat models — a denylist
-        # would leak the next such family, so only muse-spark-* is admitted.
+        # Admit the existing Spark family and only the documented Wonder IDs.
+        # Do not broaden this to muse-* or muse-wonder-*: the live endpoint
+        # also serves non-chat families, and future variants need review.
         _CHAT_FAMILY_PREFIX = "muse-spark-"
+        _CHAT_MODEL_IDS = frozenset({"muse-wonder-1.0", "muse-wonder-full-1.0"})
 
         def fetch_models(
             self,
@@ -116,7 +116,10 @@ if _HERMES_AVAILABLE:
             )
             if live is None:
                 return None
-            return [m for m in live if m.startswith(self._CHAT_FAMILY_PREFIX)]
+            return [
+                m for m in live
+                if m.startswith(self._CHAT_FAMILY_PREFIX) or m in self._CHAT_MODEL_IDS
+            ]
 
         def build_api_kwargs_extras(
             self,
@@ -137,7 +140,7 @@ if _HERMES_AVAILABLE:
     muse_code = MuseCodeSubscriptionProfile(
         name="muse-code",
         display_name="Muse Code (subscription)",
-        description="Muse Spark billed to the local Muse Code monthly login",
+        description="Muse chat models billed to the local Muse Code monthly login",
         signup_url="https://github.com/TheStreamCode/hermes-muse-code#login-once",
         env_vars=(ENV_VAR,),
         base_url=os.getenv("META_BASE_URL", "").strip() or "https://api.meta.ai/v1",

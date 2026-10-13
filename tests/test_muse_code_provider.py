@@ -177,28 +177,80 @@ def test_reasoning_effort_mapping(tmp_path, monkeypatch):
     )
 
 
-def test_fetch_models_admits_only_muse_spark(tmp_path, monkeypatch):
+def test_fetch_models_admits_spark_and_exact_wonder_ids(tmp_path, monkeypatch):
     monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
     _, registered = _load_plugin()
     profile = registered["muse-code"]
     live = [
         "muse-spark-1.3",
+        "muse-wonder-full-1.0",
         "muse-spark-1.2-contributor",
+        "muse-wonder-1.0",
         "sam-3.1",
         "muse-image-1.0",
         "muse-voice-transcribe-1.0",
+        "muse-glimmer-1.0",
+        "unrelated-chat-1.0",
+        "muse-wonder-1.1",
+        "muse-wonder-full-1.1",
+        "muse-wonder-1.0-contributor",
+        "muse-wonder-full-1.0-contributor",
+        "muse-wonder-1.0-preview",
+        "muse-wonder-full-1.0-image",
+        "muse-wonder-full-1.0-extra",
+        "prefix-muse-wonder-1.0",
+        "MUSE-WONDER-1.0",
+        "muse-wonder-1.0 ",
+        "muse-wonder",
+        "muse-sparkle-1.0",
     ]
     with patch.object(
         type(profile).__mro__[1], "fetch_models", return_value=live
-    ):
-        assert profile.fetch_models(api_key="k") == [
+    ) as fetch:
+        assert profile.fetch_models(
+            api_key="k", base_url="https://example.invalid/v1", timeout=2.5
+        ) == [
             "muse-spark-1.3",
+            "muse-wonder-full-1.0",
             "muse-spark-1.2-contributor",
+            "muse-wonder-1.0",
         ]
-    with patch.object(
-        type(profile).__mro__[1], "fetch_models", return_value=None
+        fetch.assert_called_once_with(
+            api_key="k", base_url="https://example.invalid/v1", timeout=2.5
+        )
+
+
+def test_fetch_models_preserves_account_visibility_and_failure(tmp_path, monkeypatch):
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
+    _, registered = _load_plugin()
+    profile = registered["muse-code"]
+    # No injected Wonder/Full entries or fallback on empty/failed discovery.
+    for live, expected in (
+        (["muse-spark-1.3"], ["muse-spark-1.3"]),
+        (["muse-wonder-1.0"], ["muse-wonder-1.0"]),
+        (["muse-wonder-full-1.0"], ["muse-wonder-full-1.0"]),
+        (["sam-3.1", "muse-image-1.0", "muse-voice-transcribe-1.0"], []),
+        ([], []),
+        (None, None),
     ):
-        assert profile.fetch_models(api_key="k") is None
+        with patch.object(
+            type(profile).__mro__[1], "fetch_models", return_value=live
+        ):
+            assert profile.fetch_models(api_key="k") == expected
+
+
+def test_wonder_keeps_responses_wiring_and_reasoning_mapping(tmp_path, monkeypatch):
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
+    _, registered = _load_plugin()
+    profile = registered["muse-code"]
+    assert profile.api_mode == "codex_responses"
+    for model in ("muse-spark-1.3", "muse-wonder-1.0", "muse-wonder-full-1.0"):
+        for effort, expected in (("max", "max"), ("none", "minimal")):
+            assert profile.build_api_kwargs_extras(
+                model=model, reasoning_config={"effort": effort}
+            ) == ({}, {"reasoning_effort": expected})
+    # Effort selection must not select Full or change the Spark fallback.
+    assert profile.fallback_models == ("muse-spark-1.3",)
 
 
 def test_register_entry_point_is_probe_safe(tmp_path, monkeypatch):

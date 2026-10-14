@@ -1,7 +1,7 @@
 name: muse-code-subscription
 kind: model-provider
-version: 0.2.2
-description: Muse Spark in Hermes billed to the Muse Code monthly login (device-code login, no API key)
+version: 0.3.0
+description: Muse models in Hermes billed to the Muse Code monthly login (device-code login, no API key)
 author: TheStreamCode
 license: MIT
 homepage: https://github.com/TheStreamCode/hermes-muse-code

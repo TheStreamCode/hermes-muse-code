@@ -177,13 +177,16 @@ def test_reasoning_effort_mapping(tmp_path, monkeypatch):
     )
 
 
-def test_fetch_models_admits_only_muse_spark(tmp_path, monkeypatch):
+def test_fetch_models_admits_live_catalog_dynamically(tmp_path, monkeypatch):
     monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
     _, registered = _load_plugin()
     profile = registered["muse-code"]
     live = [
         "muse-spark-1.3",
         "muse-spark-1.2-contributor",
+        "muse-wonder-1.0",
+        "muse-wonder-full-1.0",
+        "muse-nova-9.9",
         "sam-3.1",
         "muse-image-1.0",
         "muse-voice-transcribe-1.0",
@@ -194,6 +197,9 @@ def test_fetch_models_admits_only_muse_spark(tmp_path, monkeypatch):
         assert profile.fetch_models(api_key="k") == [
             "muse-spark-1.3",
             "muse-spark-1.2-contributor",
+            "muse-wonder-1.0",
+            "muse-wonder-full-1.0",
+            "muse-nova-9.9",
         ]
     with patch.object(
         type(profile).__mro__[1], "fetch_models", return_value=None

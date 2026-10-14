@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/TheStreamCode/hermes-muse-code/actions/workflows/ci.yml/badge.svg)](https://github.com/TheStreamCode/hermes-muse-code/actions/workflows/ci.yml)
 
-Use Meta **Muse Spark** in [Hermes Agent](https://github.com/NousResearch/hermes-agent)
+Use Meta **Muse models** in [Hermes Agent](https://github.com/NousResearch/hermes-agent)
 billed to your **Muse Code monthly subscription** — no pay-as-you-go API key required.
 
 Hermes' built-in Meta provider only accepts explicit API keys, so subscribers
@@ -44,8 +44,10 @@ endpoint is aggressively rate-limited, so the plugin never re-mints on its own.
 hermes chat -m muse-spark-1.3 --provider muse-code
 ```
 
-Or pick provider `muse-code` from `hermes model`. Serves the Muse Spark
-family (`muse-spark-1.1` / `1.2` / `1.3`, including `-contributor` tiers).
+Or pick provider `muse-code` from `hermes model`. Model discovery is live:
+every model id returned by your account catalog is served except the
+endpoint families verified as non-chat (`sam-*`, `muse-image-*`,
+`muse-voice-*`), so newly published models appear with no plugin update.
 
 ## Configuration
 

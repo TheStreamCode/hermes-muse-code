@@ -29,7 +29,6 @@ CREDENTIALS_ENV_VAR = "MUSE_CODE_SUB_CREDENTIALS"
 CREDENTIALS_FILENAME = "muse-code-sub.json"
 
 try:
-    from agent.reasoning_effort import META_AI_EFFORTS, clamp_effort
     from providers import register_provider
     from providers.base import ProviderProfile
 except ImportError:
@@ -91,10 +90,51 @@ def register(ctx) -> None:
     _ensure_subscription_key()
 
 
+# Meta Model API (Muse) wire vocabulary, vendored from Hermes core
+# (agent/reasoning_effort.py, META_AI_EFFORTS @ Hermes v0.22.0): Meta
+# rejects ``none``. Catalog rule 9 forbids third-party plugins from
+# importing private core modules, so the two names the bundled meta-ai
+# profile imports are copied here instead of imported. Like base_url and
+# api_mode below, this is a Meta wire fact the plugin already pins; if
+# Meta's accepted levels ever change, update this tuple (and the pin test).
+_META_WIRE_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
+
+# Canonical low→high ladder, vendored alongside the tuple above: clamp
+# targets resolve against this ordering.
+_EFFORT_LADDER = ("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
+
+
+def _clamp_effort(effort, supported):
+    """Clamp a requested effort onto a wire's supported levels.
+
+    Same contract as Hermes core ``clamp_effort`` for this call shape
+    (no vendor overrides on the Meta wire): verbatim when supported,
+    unknown, or empty; else the nearest weaker supported level, never
+    escalating cost; else the weakest supported level. ``none`` is
+    never a degradation target.
+    """
+    requested = str(effort or "").strip().lower()
+    if not requested or not supported:
+        return effort
+    supported_norm = [lvl for lvl in (str(s).strip().lower() for s in supported) if lvl in _EFFORT_LADDER]
+    if not supported_norm or requested in supported_norm:
+        return effort
+    if requested not in _EFFORT_LADDER:
+        return effort
+    candidates = [level for level in supported_norm if level != "none"]
+    if not candidates:
+        return effort
+    requested_idx = _EFFORT_LADDER.index(requested)
+    below = [level for level in candidates if _EFFORT_LADDER.index(level) < requested_idx]
+    return max(below, key=_EFFORT_LADDER.index) if below else min(candidates, key=_EFFORT_LADDER.index)
+
+
 if _HERMES_AVAILABLE:
     # Intentional parity copy of the bundled `meta-ai` provider profile: the
     # wire quirks below (Responses API, reasoning_effort mapping, vision
     # limits) must stay in sync with it; do not "simplify" them away.
+    # The effort clamp is vendored above (catalog rule 9 forbids importing
+    # it); keep it in sync with agent/reasoning_effort.py too.
     class MuseCodeSubscriptionProfile(ProviderProfile):
         """Meta Model API via the Muse Code subscription."""
 
@@ -134,8 +174,8 @@ if _HERMES_AVAILABLE:
             if rc.get("enabled") is False or effort == "none":
                 mapped = "minimal"
             else:
-                clamped = clamp_effort(effort, META_AI_EFFORTS)
-                mapped = clamped if clamped in META_AI_EFFORTS else "medium"
+                clamped = _clamp_effort(effort, _META_WIRE_EFFORTS)
+                mapped = clamped if clamped in _META_WIRE_EFFORTS else "medium"
             return {}, {"reasoning_effort": mapped}
 
     muse_code = MuseCodeSubscriptionProfile(

@@ -223,20 +223,9 @@ def _check_capability_probe(plugin_dir: Path, manifest: dict) -> None:
 
     base_mod.ProviderProfile = ProviderProfile  # type: ignore[attr-defined]
 
-    agent_mod = types.ModuleType("agent")
-    reasoning_mod = types.ModuleType("agent.reasoning_effort")
-    reasoning_mod.META_AI_EFFORTS = (  # type: ignore[attr-defined]
-        "minimal", "low", "medium", "high", "xhigh", "max",
-    )
-    reasoning_mod.clamp_effort = lambda effort, efforts: (  # type: ignore[attr-defined]
-        effort if effort in efforts else "medium"
-    )
-
-    saved = {k: sys.modules.get(k) for k in ("providers", "providers.base", "agent", "agent.reasoning_effort")}
+    saved = {k: sys.modules.get(k) for k in ("providers", "providers.base")}
     sys.modules["providers"] = providers_mod
     sys.modules["providers.base"] = base_mod
-    sys.modules["agent"] = agent_mod
-    sys.modules["agent.reasoning_effort"] = reasoning_mod
     try:
         spec = importlib.util.spec_from_file_location(
             "local_validate_probe_plugin", str(init),

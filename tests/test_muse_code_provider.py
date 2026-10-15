@@ -17,8 +17,6 @@ REPO = Path(__file__).resolve().parent.parent
 PLUGIN_FILE = REPO / "__init__.py"
 LOGIN_FILE = REPO / "muse_code_login.py"
 
-EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
-
 
 def _load(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
@@ -29,7 +27,7 @@ def _load(name, path):
 
 
 def _load_plugin(env=None):
-    """Import the plugin with stubbed `agent`/`providers` packages."""
+    """Import the plugin with a stubbed `providers` package."""
     os.environ.pop("MUSE_CODE_SUB_TOKEN", None)
     for var in ("MUSE_CODE_SUB_TOKEN",):
         env_value = (env or {}).get(var)
@@ -37,14 +35,6 @@ def _load_plugin(env=None):
             os.environ.pop(var, None)
         else:
             os.environ[var] = env_value
-
-    agent = types.ModuleType("agent")
-    reasoning = types.ModuleType("agent.reasoning_effort")
-    reasoning.META_AI_EFFORTS = EFFORTS
-    reasoning.clamp_effort = (
-        lambda effort, efforts: effort if effort in efforts else "medium"
-    )
-    agent.reasoning_effort = reasoning
 
     registered = {}
 
@@ -66,8 +56,6 @@ def _load_plugin(env=None):
     with patch.dict(
         sys.modules,
         {
-            "agent": agent,
-            "agent.reasoning_effort": reasoning,
             "providers": providers,
             "providers.base": base_mod,
         },
@@ -175,6 +163,46 @@ def test_reasoning_effort_mapping(tmp_path, monkeypatch):
         {},
         {"reasoning_effort": "medium"},
     )
+    assert profile.build_api_kwargs_extras(reasoning_config=None) == (
+        {},
+        {"reasoning_effort": "medium"},
+    )
+    assert profile.build_api_kwargs_extras(
+        reasoning_config={"effort": "none"}
+    ) == ({}, {"reasoning_effort": "minimal"})
+    assert profile.build_api_kwargs_extras(
+        reasoning_config={"effort": "minimal"}
+    ) == ({}, {"reasoning_effort": "minimal"})
+    assert profile.build_api_kwargs_extras(
+        reasoning_config={"effort": "max"}
+    ) == ({}, {"reasoning_effort": "xhigh"})
+    assert profile.build_api_kwargs_extras(
+        reasoning_config={"effort": "ultra"}
+    ) == ({}, {"reasoning_effort": "xhigh"})
+    assert profile.build_api_kwargs_extras(
+        reasoning_config={"effort": "bespoke-level"}
+    ) == ({}, {"reasoning_effort": "medium"})
+
+
+def test_meta_wire_vocabulary_pinned(tmp_path, monkeypatch):
+    """The vendored Meta wire set must match Hermes core META_AI_EFFORTS."""
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
+    module, _ = _load_plugin()
+    assert module._META_WIRE_EFFORTS == ("minimal", "low", "medium", "high", "xhigh")
+
+
+def test_clamp_effort_semantics(tmp_path, monkeypatch):
+    """Vendored clamp keeps the core contract: verbatim/nearest-weaker/weakest."""
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
+    module, _ = _load_plugin()
+    clamp = module._clamp_effort
+    supported = module._META_WIRE_EFFORTS
+    assert clamp("high", supported) == "high"
+    assert clamp("max", supported) == "xhigh"
+    assert clamp("ultra", supported) == "xhigh"
+    assert clamp("bespoke", supported) == "bespoke"
+    assert clamp("", supported) == ""
+    assert clamp("none", supported) == "minimal"
 
 
 def test_fetch_models_admits_live_catalog_dynamically(tmp_path, monkeypatch):
@@ -218,7 +246,7 @@ def test_register_entry_point_is_probe_safe(tmp_path, monkeypatch):
 def test_importable_without_hermes_runtime(tmp_path, monkeypatch):
     """Plain import registers nothing but keeps helpers usable."""
     monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
-    for mod in ("agent", "agent.reasoning_effort", "providers", "providers.base"):
+    for mod in ("providers", "providers.base"):
         assert mod not in sys.modules
     spec = importlib.util.spec_from_file_location(
         "_hermes_test_muse_code_bare", PLUGIN_FILE

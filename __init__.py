@@ -27,6 +27,13 @@ logger = logging.getLogger(__name__)
 ENV_VAR = "MUSE_CODE_SUB_TOKEN"
 CREDENTIALS_ENV_VAR = "MUSE_CODE_SUB_CREDENTIALS"
 CREDENTIALS_FILENAME = "muse-code-sub.json"
+DEFAULT_BASE_URL = "https://api.meta.ai/v1"
+
+# The subscription key is exported into the process environment because
+# Hermes resolves api_key providers from env_vars (providers/base.py and
+# agent/client_lifecycle.py); there is no provider callback for a raw key.
+# Only values written here are touched on refresh; an explicit user value wins.
+_ENV_KEY_OWNED: str | None = None
 
 try:
     from providers import register_provider
@@ -62,22 +69,24 @@ def read_cached_key(path: str | None = None) -> str:
 
 
 def _ensure_subscription_key() -> None:
-    if os.getenv(ENV_VAR, "").strip():
-        return  # explicit configuration keeps priority
-    try:
-        key = read_cached_key()
-    except Exception:
+    """Keep the provider env var aligned with the login cache.
+
+    Refresh the value when the cache changed, remove it when the cache is gone,
+    and never overwrite a value the user set explicitly.
+    """
+    global _ENV_KEY_OWNED
+    explicit = os.getenv(ENV_VAR, "").strip()
+    if explicit and explicit != _ENV_KEY_OWNED:
+        _ENV_KEY_OWNED = None
         return
+    key = read_cached_key()
     if key:
-        os.environ[ENV_VAR] = key
-    else:
-        logger.debug(
-            "no %s and no usable credential cache; run muse_code_login.py",
-            ENV_VAR,
-        )
-
-
-_ensure_subscription_key()
+        if key != _ENV_KEY_OWNED:
+            os.environ[ENV_VAR] = key
+            _ENV_KEY_OWNED = key
+    elif _ENV_KEY_OWNED is not None:
+        os.environ.pop(ENV_VAR, None)
+        _ENV_KEY_OWNED = None
 
 
 def register(ctx) -> None:
@@ -87,7 +96,8 @@ def register(ctx) -> None:
     a login that completed after import is picked up. Stdlib-only, so the
     admission probe can run it in a bare interpreter.
     """
-    _ensure_subscription_key()
+    if _HERMES_AVAILABLE:
+        _ensure_subscription_key()
 
 
 # Meta Model API (Muse) wire vocabulary, vendored from Hermes core
@@ -130,6 +140,7 @@ def _clamp_effort(effort, supported):
 
 
 if _HERMES_AVAILABLE:
+    _ensure_subscription_key()
     # Intentional parity copy of the bundled `meta-ai` provider profile: the
     # wire quirks below (Responses API, reasoning_effort mapping, vision
     # limits) must stay in sync with it; do not "simplify" them away.
@@ -151,6 +162,7 @@ if _HERMES_AVAILABLE:
             base_url: str | None = None,
             timeout: float = 8.0,
         ) -> list[str] | None:
+            _ensure_subscription_key()
             live = super().fetch_models(
                 api_key=api_key, base_url=base_url, timeout=timeout
             )
@@ -184,7 +196,7 @@ if _HERMES_AVAILABLE:
         description="Muse chat models billed to the local Muse Code monthly login",
         signup_url="https://github.com/TheStreamCode/hermes-muse-code#login-once",
         env_vars=(ENV_VAR,),
-        base_url=os.getenv("META_BASE_URL", "").strip() or "https://api.meta.ai/v1",
+        base_url=DEFAULT_BASE_URL,
         auth_type="api_key",
         # Responses API engages Muse prompt caching; same wire as meta-ai.
         api_mode="codex_responses",

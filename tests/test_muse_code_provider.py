@@ -8,14 +8,25 @@ import json
 import os
 import sys
 import types
-import urllib.error
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 REPO = Path(__file__).resolve().parent.parent
 PLUGIN_FILE = REPO / "__init__.py"
 LOGIN_FILE = REPO / "muse_code_login.py"
+
+
+@pytest.fixture(autouse=True)
+def _clean_secret_env():
+    """Do not leak provider env between tests or into the developer shell."""
+    for var in ("MUSE_CODE_SUB_TOKEN", "MUSE_CODE_SUB_CREDENTIALS"):
+        os.environ.pop(var, None)
+    yield
+    for var in ("MUSE_CODE_SUB_TOKEN", "MUSE_CODE_SUB_CREDENTIALS"):
+        os.environ.pop(var, None)
 
 
 def _load(name, path):
@@ -119,6 +130,58 @@ def test_cached_key_resolution(tmp_path, monkeypatch):
     assert module.read_cached_key() == "LLM|k"
     module._ensure_subscription_key()
     assert os.environ["MUSE_CODE_SUB_TOKEN"] == "LLM|k"
+
+
+def test_base_url_is_fixed(tmp_path, monkeypatch):
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
+    monkeypatch.setenv("META_BASE_URL", "https://attacker.test/v1")
+    _, registered = _load_plugin()
+    assert registered["muse-code"].base_url == "https://api.meta.ai/v1"
+
+
+def test_cache_change_refreshes_owned_env(tmp_path, monkeypatch):
+    cache = tmp_path / "cache.json"
+    cache.write_text(json.dumps({"apiKey": "LLM|first"}))
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(cache))
+    module, _ = _load_plugin()
+    assert os.environ["MUSE_CODE_SUB_TOKEN"] == "LLM|first"
+    cache.write_text(json.dumps({"apiKey": "LLM|second"}))
+    module._ensure_subscription_key()
+    assert os.environ["MUSE_CODE_SUB_TOKEN"] == "LLM|second"
+
+
+def test_removed_cache_clears_owned_env(tmp_path, monkeypatch):
+    cache = tmp_path / "cache.json"
+    cache.write_text(json.dumps({"apiKey": "LLM|gone"}))
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(cache))
+    module, _ = _load_plugin()
+    assert os.environ["MUSE_CODE_SUB_TOKEN"] == "LLM|gone"
+    cache.unlink()
+    module._ensure_subscription_key()
+    assert "MUSE_CODE_SUB_TOKEN" not in os.environ
+
+
+def test_explicit_env_is_never_overwritten(tmp_path, monkeypatch):
+    cache = tmp_path / "cache.json"
+    cache.write_text(json.dumps({"apiKey": "LLM|cache"}))
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(cache))
+    module, _ = _load_plugin(env={"MUSE_CODE_SUB_TOKEN": "pinned"})
+    module._ensure_subscription_key()
+    assert os.environ["MUSE_CODE_SUB_TOKEN"] == "pinned"
+    assert module._ENV_KEY_OWNED is None
+
+
+def test_bare_import_does_not_export_the_key(tmp_path, monkeypatch):
+    cache = tmp_path / "cache.json"
+    cache.write_text(json.dumps({"apiKey": "LLM|bare"}))
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(cache))
+    spec = importlib.util.spec_from_file_location(
+        "_hermes_test_muse_code_bare_env", PLUGIN_FILE
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module._HERMES_AVAILABLE is False
+    assert "MUSE_CODE_SUB_TOKEN" not in os.environ
 
 
 def test_missing_cache_is_silent_miss(tmp_path, monkeypatch):
@@ -335,3 +398,13 @@ def test_login_poll_timeout():
                     assert "timed out" in str(exc)
                 else:
                     raise AssertionError("expected LoginError")
+
+
+def test_login_auth_contract_is_pinned():
+    login = _load_login()
+    assert login.AUTH_CONTRACT_VERSION == 1
+    assert login.CLIENT_ID == "1031625952748946"
+    assert login.DEVICE_URL == "https://auth.meta.com/oidc/device/authorization/"
+    assert login.TOKEN_URL == "https://auth.meta.com/oidc/device/token/"
+    assert login.KEY_URL == "https://api.meta.ai/muse-code/key"
+    assert login.API_VERSION == "1.0.0"

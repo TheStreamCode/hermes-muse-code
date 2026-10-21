@@ -10,9 +10,15 @@ end up metered twice: once for the subscription, once per token. This plugin
 adds a `muse-code` provider that reuses your own Meta login, routing the
 same models through the subscription you already pay for.
 
+> **Unofficial and experimental.** This plugin uses a Muse Code subscription
+> credential from Hermes Agent. Meta's terms limit that credential to Muse Code,
+> so this use may not be supported and Meta may suspend or revoke accounts or
+> credentials. Use it at your own risk; the authors cannot recover an account.
+> Read [DISCLAIMER.md](DISCLAIMER.md) before installing.
+
 ## Requirements
 
-- Hermes Agent `>= 0.21.3`
+- Hermes Agent `>= 0.22.0`
 - Python 3.11+ (for the one-time login script; stdlib only, no dependencies)
 
 ## Install
@@ -38,6 +44,14 @@ to disk.
 The key is never printed. Re-run only if access is revoked (401) — the mint
 endpoint is aggressively rate-limited, so the plugin never re-mints on its own.
 
+Because Hermes resolves API-key providers from environment variables, the
+plugin exports `MUSE_CODE_SUB_TOKEN` in the process environment and refreshes
+it from the login cache; an explicit value always wins. Restart long-lived
+gateway workers after re-running the login script.
+
+To remove access, delete `$HERMES_HOME/muse-code-sub.json`; run `muse logout`
+if you also want to clear the Muse Code CLI session.
+
 ## Usage
 
 ```powershell
@@ -59,8 +73,8 @@ endpoint families verified as non-chat (`sam-*`, `muse-image-*`,
 ## How it works
 
 The login script performs a Meta device-code exchange (RFC 8628) and mints
-the subscription key via the Model API; the provider reads the cache on
-every fresh process and exposes it as `MUSE_CODE_SUB_TOKEN` for a standard
+the subscription key via the Model API; the provider reads the cache at import
+and refreshes `MUSE_CODE_SUB_TOKEN` when the cache changes, for a standard
 `api_key` provider against `https://api.meta.ai/v1` over the Responses API —
 the same wire as the bundled Meta provider, so prompt caching applies. The
 key lives only in process memory and is never logged. A standalone login
@@ -88,4 +102,5 @@ see [NOTICE](NOTICE). No third-party CLI is required or invoked.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). The software is provided "as is"; see
+[DISCLAIMER.md](DISCLAIMER.md) for the risk notice and liability terms.

@@ -21,6 +21,7 @@ DEVICE_URL = "https://auth.meta.com/oidc/device/authorization/"
 TOKEN_URL = "https://auth.meta.com/oidc/device/token/"
 KEY_URL = "https://api.meta.ai/muse-code/key"
 API_VERSION = "1.0.0"
+AUTH_CONTRACT_VERSION = 1
 REQUEST_TIMEOUT_SECS = 25
 MIN_POLL_INTERVAL_SECS = 1.0
 SLOW_DOWN_INCREMENT_SECS = 5.0

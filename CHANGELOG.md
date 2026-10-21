@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-21
+
+### Fixed
+
+- The subscription provider ignored `META_BASE_URL` and could be pointed at another host; the base
+  URL is now pinned to the subscription endpoint.
+- `MUSE_CODE_SUB_TOKEN` is refreshed from the credential cache without overwriting an explicit
+  value set in the environment.
+- Importing the plugin no longer exports the subscription key as a side effect.
+- Third-party plugins may not import private Hermes core modules: the Meta effort vocabulary and
+  the `clamp_effort` contract are now vendored locally (provenance: `agent/reasoning_effort.py` at
+  Hermes v0.22.0) with identical behavior. `hermes plugins validate` is clean.
+
+### Changed
+
+- Requires Hermes Agent 0.22.0 or newer.
+- Added `AUTH_CONTRACT.md`, ruff configuration and regression tests; repository documentation and
+  community files aligned with the shared standard.
+
 ## [0.3.0] - 2026-10-14
 
 ### Added
@@ -60,6 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Probe-safe `register()` entry point for plugin discovery, with catalog handling and
   credential-secrecy tests.
 
+[0.4.0]: https://github.com/TheStreamCode/hermes-muse-code/releases/tag/v0.4.0
 [0.3.0]: https://github.com/TheStreamCode/hermes-muse-code/releases/tag/v0.3.0
 [0.2.2]: https://github.com/TheStreamCode/hermes-muse-code/releases/tag/v0.2.2
 [0.2.1]: https://github.com/TheStreamCode/hermes-muse-code/releases/tag/v0.2.1

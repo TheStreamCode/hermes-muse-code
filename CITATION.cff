@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "hermes-muse-code"
+version: 0.3.0
+date-released: "2026-10-14"
+url: "https://github.com/TheStreamCode/hermes-muse-code"
+repository-code: "https://github.com/TheStreamCode/hermes-muse-code"
+license: MIT
+abstract: >-
+  Unofficial Hermes Agent provider plugin that serves Meta Muse models billed
+  to a Muse Code monthly subscription through a one-time Meta device-code
+  login, with an owner-only credential cache.
+keywords:
+  - byok
+  - coding-agent
+  - hermes-agent
+  - meta-ai
+  - muse-code
+  - muse-spark
+  - python
+authors:
+  - family-names: Gasperini
+    given-names: Michael
+    affiliation: Mikesoft

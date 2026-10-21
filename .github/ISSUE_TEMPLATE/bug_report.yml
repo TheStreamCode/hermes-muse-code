@@ -8,6 +8,7 @@ body:
       value: |
         Thanks for helping improve this independent, unofficial integration.
         Remove subscription keys, credentials, private prompts, and account data before submitting.
+        For security issues use SECURITY.md, never a public issue.
   - type: textarea
     id: summary
     attributes:
@@ -26,22 +27,11 @@ body:
         3. Observe...
     validations:
       required: true
-  - type: dropdown
-    id: installation
-    attributes:
-      label: Installation route
-      options:
-        - Manual directory install from a release tag
-        - Development checkout from main
-        - Entry-point or native install under development
-        - Other
-    validations:
-      required: true
   - type: input
     id: plugin-version
     attributes:
       label: Plugin version or commit
-      placeholder: v0.2.0 or a commit SHA
+      placeholder: v0.3.0 or a commit SHA
     validations:
       required: true
   - type: input

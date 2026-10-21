@@ -1,8 +1,8 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 title: "hermes-muse-code"
-version: 0.3.0
-date-released: "2026-10-14"
+version: 0.4.0
+date-released: "2026-10-21"
 url: "https://github.com/TheStreamCode/hermes-muse-code"
 repository-code: "https://github.com/TheStreamCode/hermes-muse-code"
 license: MIT

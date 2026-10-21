@@ -1,24 +1,45 @@
 # Security Policy
 
-## Reporting a Vulnerability
+## Supported versions
 
-Use GitHub's
-[private vulnerability reporting](https://github.com/TheStreamCode/hermes-muse-code/security/advisories/new)
-for sensitive findings. If that route is unavailable, email
-`info@mikesoft.it` with the subject `Hermes Muse Code Security Report`.
-Do not disclose API keys, credentials, private prompts, or account data in a
-public issue.
+Security fixes are shipped for the latest release only.
 
-For non-sensitive security hardening, open an issue with the affected component,
-observed behavior, impact, and a minimal reproduction where practical.
+| Version | Supported |
+| --- | --- |
+| Latest release | Yes |
+| Older releases | No |
 
-## Supported Version
+## Reporting a vulnerability
 
-Security fixes target the latest published release and the current `main` branch.
+Do not open a public issue for a security problem. Report it privately through
+[GitHub Security Advisories](../../security/advisories/new) on this repository.
 
-## Credential Handling
+Include:
 
-This project must never log, persist, or commit Muse subscription credentials.
-The subscription key lives owner-only in the local credential cache and in
-process memory; it is never written to logs. Local credentials belong in the
-active Hermes profile's ignored environment configuration.
+- affected version and platform;
+- a description of the issue and its impact;
+- reproduction steps or a proof of concept;
+- any mitigation you already know about.
+
+You can expect an initial acknowledgement within 7 days and a status update within 30 days. If the
+report is valid, a fix is prepared privately and disclosed in the release notes once a patched
+version is available. Credit is given in the advisory unless you ask otherwise.
+
+## Scope
+
+In scope:
+
+- defects in this repository's code, build scripts or release artifacts;
+- credential or secret exposure caused by this project;
+- privilege or sandbox escapes in code shipped by this project.
+
+Out of scope:
+
+- vulnerabilities in third-party products this project integrates with (report them upstream);
+- misconfiguration of a user's environment;
+- social engineering, spam or denial-of-service against third-party services.
+
+## Handling of credentials
+
+This project never asks for credentials in issues, pull requests or logs. Do not paste tokens,
+cookies or personal access tokens in a report. Redact secrets from logs before attaching them.

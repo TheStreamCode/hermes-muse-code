@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-10-30
+
+### Added
+
+- `hermes auth add muse-code` runs the Meta device login in the browser and stores the credential in
+  the existing cache.
+
+### Fixed
+
+- Meta's client restriction (403) is classified as a provider policy block instead of a revoked
+  credential, so the host no longer recommends re-authentication for it.
+- Login errors no longer echo endpoint response bodies.
+
+### Changed
+
+- The standalone login script remains available; the README documents the browser flow and the
+  restriction.
+
 ## [0.4.0] - 2026-10-21
 
 ### Fixed

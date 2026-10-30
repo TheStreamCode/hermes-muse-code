@@ -25,6 +25,18 @@ Meta may change, restrict or enforce its terms at any time, and may suspend,
 restrict or terminate accounts, subscriptions or credentials involved. The
 authors cannot prevent, predict or reverse that outcome.
 
+## Request shaping
+
+Since 2026-10-29 Meta refuses subscription requests from other clients when the
+declared client tool names collide with Muse Code's builtin tool names. The
+plugin therefore runs a local adapter that renames exactly those declarations on
+the way to `api.meta.ai` and restores them in the response. This is a deliberate
+workaround of Meta's client restriction: it does not forge a credential, token
+or signature, and the subscription key remains your own. Meta may treat the
+reshaping itself as a violation of its terms, and access may be revoked
+immediately; the suspension and revocation risks described above apply with
+full force.
+
 ## No warranty, no guarantee
 
 - The integration is provided "as is"; there is no guarantee that it is

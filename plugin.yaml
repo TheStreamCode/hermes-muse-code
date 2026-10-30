@@ -1,6 +1,6 @@
 name: muse-code-subscription
 kind: model-provider
-version: 0.5.0
+version: 0.6.0
 description: "Unofficial and experimental: Muse models in Hermes using a Muse Code subscription credential. May conflict with Meta's terms; use at your own risk (see DISCLAIMER.md)."
 author: TheStreamCode
 license: MIT

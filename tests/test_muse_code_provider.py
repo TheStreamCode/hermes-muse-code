@@ -6,7 +6,9 @@ import importlib
 import importlib.util
 import io
 import json
+import logging
 import os
+import re
 import sys
 import types
 import urllib.error
@@ -117,7 +119,9 @@ def test_provider_registered_with_expected_wiring(tmp_path, monkeypatch):
     monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "cache.json"))
     module, registered = _load_plugin()
     profile = registered["muse-code"]
-    assert profile.base_url == "https://api.meta.ai/v1"
+    # Inference goes through the loopback wire adapter, not the direct endpoint.
+    assert re.fullmatch(r"http://127\.0\.0\.1:\d+/v1", profile.base_url)
+    assert module.DEFAULT_BASE_URL == "https://api.meta.ai/v1"
     assert profile.api_mode == "codex_responses"
     assert profile.auth_type == "api_key"
     assert profile.env_vars == ("MUSE_CODE_SUB_TOKEN",)
@@ -193,11 +197,46 @@ def test_cached_key_resolution(tmp_path, monkeypatch):
     assert os.environ["MUSE_CODE_SUB_TOKEN"] == "LLM|k"
 
 
-def test_base_url_is_fixed(tmp_path, monkeypatch):
+def test_base_url_uses_the_loopback_adapter(tmp_path, monkeypatch):
     monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
     monkeypatch.setenv("META_BASE_URL", "https://attacker.test/v1")
     _, registered = _load_plugin()
+    base_url = registered["muse-code"].base_url
+    assert re.fullmatch(r"http://127\.0\.0\.1:\d+/v1", base_url)
+    assert "attacker.test" not in base_url
+
+
+def test_adapter_bind_failure_falls_back_to_the_direct_endpoint(
+    tmp_path, monkeypatch, caplog
+):
+    """A missing loopback port keeps the pre-adapter endpoint and warns."""
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
+    submodule = "_hermes_test_muse_code.muse_adapter"
+    real = sys.modules.get(submodule)
+    fake = types.ModuleType(submodule)
+
+    def unavailable(**kwargs):
+        raise OSError("no loopback port available")
+
+    fake.start_adapter = unavailable
+    sys.modules[submodule] = fake
+    try:
+        with caplog.at_level(logging.WARNING, logger="_hermes_test_muse_code"):
+            _, registered = _load_plugin()
+    finally:
+        if real is None:
+            sys.modules.pop(submodule, None)
+        else:
+            sys.modules[submodule] = real
     assert registered["muse-code"].base_url == "https://api.meta.ai/v1"
+    assert "adapter" in caplog.text.lower()
+
+
+def test_repeated_imports_reuse_one_adapter(tmp_path, monkeypatch):
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
+    _, first = _load_plugin()
+    _, second = _load_plugin()
+    assert first["muse-code"].base_url == second["muse-code"].base_url
 
 
 def test_cache_change_refreshes_owned_env(tmp_path, monkeypatch):
@@ -262,8 +301,6 @@ def test_explicit_env_wins_over_cache(tmp_path, monkeypatch):
 
 
 def test_no_secret_material_in_logs(tmp_path, monkeypatch, caplog):
-    import logging
-
     cache = tmp_path / "cache.json"
     cache.write_text(json.dumps({"apiKey": "LLM|sentinel-secret"}))
     monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(cache))
@@ -361,10 +398,12 @@ def test_fetch_models_admits_live_catalog_dynamically(tmp_path, monkeypatch):
 
 def test_register_entry_point_is_probe_safe(tmp_path, monkeypatch):
     monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
-    module, _ = _load_plugin(env={"MUSE_CODE_SUB_TOKEN": "pinned"})
+    module, registered = _load_plugin(env={"MUSE_CODE_SUB_TOKEN": "pinned"})
+    base_url = registered["muse-code"].base_url
     assert callable(getattr(module, "register", None))
     module.register(object())
     assert os.environ["MUSE_CODE_SUB_TOKEN"] == "pinned"
+    assert registered["muse-code"].base_url == base_url
 
 
 def test_importable_without_hermes_runtime(tmp_path, monkeypatch):

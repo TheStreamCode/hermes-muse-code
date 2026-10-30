@@ -14,6 +14,12 @@ without secret material.
 Credential cache: ``$HERMES_HOME/muse-code-sub.json`` (override with
 ``MUSE_CODE_SUB_CREDENTIALS``).
 
+Inference goes through a loopback wire adapter (``muse_adapter.py``): Meta
+refuses subscription requests whose flat tool names collide with Muse Code's
+builtin names, so the adapter aliases exactly those names on the wire and
+restores them in the response. If the adapter cannot bind a loopback port,
+the provider keeps the direct endpoint and logs a warning.
+
 The Hermes imports are guarded: outside the Hermes runtime (pytest
 collection, linters) the module stays importable and registers nothing.
 """
@@ -27,6 +33,8 @@ logger = logging.getLogger(__name__)
 ENV_VAR = "MUSE_CODE_SUB_TOKEN"
 CREDENTIALS_ENV_VAR = "MUSE_CODE_SUB_CREDENTIALS"
 CREDENTIALS_FILENAME = "muse-code-sub.json"
+# Direct upstream and fallback endpoint; the profile normally points at the
+# loopback wire adapter started by _adapter_base_url().
 DEFAULT_BASE_URL = "https://api.meta.ai/v1"
 
 # The subscription key is exported into the process environment because
@@ -40,8 +48,13 @@ try:
     from providers.base import ProviderProfile
 except ImportError:
     _HERMES_AVAILABLE = False
+    _start_adapter = None
 else:
     _HERMES_AVAILABLE = True
+    try:
+        from .muse_adapter import start_adapter as _start_adapter
+    except ImportError:  # pragma: no cover - only a broken install layout
+        _start_adapter = None
 
 
 def default_credentials_path() -> str:
@@ -89,15 +102,48 @@ def _ensure_subscription_key() -> None:
         _ENV_KEY_OWNED = None
 
 
+def _adapter_base_url() -> str:
+    """Start the loopback wire adapter once and return the provider base URL.
+
+    Meta refuses subscription requests whose flat tool names collide with Muse
+    Code's builtin names; ``muse_adapter`` aliases exactly those names on the
+    wire and restores them in the response. Starting is idempotent, so repeated
+    imports and registrations reuse the same server. If no loopback port can be
+    bound, keep the direct endpoint (the pre-0.6 behavior) and warn: only the
+    exception type is logged, never credentials or payloads.
+    """
+    if _start_adapter is None:
+        return DEFAULT_BASE_URL
+    try:
+        adapter = _start_adapter(log=logger.debug)
+    except Exception as error:  # noqa: BLE001 - a bind failure must not break import
+        logger.warning(
+            "Muse Code wire adapter unavailable (%s); using %s directly",
+            type(error).__name__,
+            DEFAULT_BASE_URL,
+        )
+        return DEFAULT_BASE_URL
+    return adapter.base_url
+
+
+def _refresh_base_url() -> None:
+    """Point the registered profile at the adapter, or at the fallback endpoint."""
+    base_url = _adapter_base_url()
+    if muse_code.base_url != base_url:
+        muse_code.base_url = base_url
+
+
 def register(ctx) -> None:
     """PluginManager entry point (also required by `hermes plugins validate`).
 
     Provider registration already happened at import; re-read the cache so
-    a login that completed after import is picked up. Stdlib-only, so the
-    admission probe can run it in a bare interpreter.
+    a login that completed after import is picked up, and retry the wire
+    adapter in case the first bind failed. Stdlib-only, so the admission probe
+    can run it in a bare interpreter.
     """
     if _HERMES_AVAILABLE:
         _ensure_subscription_key()
+        _refresh_base_url()
 
 
 # Meta Model API (Muse) wire vocabulary, vendored from Hermes core
@@ -227,7 +273,9 @@ if _HERMES_AVAILABLE:
         description="Muse chat models billed to the local Muse Code monthly login",
         signup_url="https://github.com/TheStreamCode/hermes-muse-code#login-once",
         env_vars=(ENV_VAR,),
-        base_url=DEFAULT_BASE_URL,
+        # Loopback wire adapter in front of api.meta.ai; DEFAULT_BASE_URL when
+        # the adapter could not bind and the provider runs direct.
+        base_url=_adapter_base_url(),
         auth_type="api_key",
         auth_handler=_auth_handler,
         classify_api_error=_classify_client_restriction,

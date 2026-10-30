@@ -5,6 +5,43 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-10-30
+
+### Added
+
+- Local loopback wire adapter (`muse_adapter.py`, `ADAPTER_CONTRACT.md` v3) in front of
+  `api.meta.ai`: it aliases client tool names that collide with Muse Code's builtin tool names
+  (`read_file`, `bash`, `web_search`, ...), restores them in streamed and JSON responses, repairs
+  empty function-call arguments from the SSE deltas, and normalizes `tool_choice`, reasoning
+  effort, the output-token floor and the encrypted-reasoning include. Subscription inference keeps
+  working after Meta's 2026-10-29 client restriction. The collision set covers the 40 Muse
+  builtin names (goal, cron, session and patch families included), and a refusal not covered by it
+  triggers one retry with every tool aliased.
+- `MUSE_CODE_ADAPTER=off` keeps the local proxy but disables the reshaped tool declarations and the
+  parameter normalization.
+
+### Documented
+
+- Troubleshooting for two deployment overrides that bypass the adapter: an explicit
+  `MUSE_CODE_SUB_TOKEN` in the environment or `$HERMES_HOME/.env` (Meta answers `402
+  billing_not_configured` for a stale pay-as-you-go key), and a `base_url` under `model:` in
+  `$HERMES_HOME/config.yaml` written by the `hermes model` picker.
+
+### Changed
+
+- The `muse-code` provider base URL is now the adapter's `/v1` origin instead of the direct Meta
+  endpoint; repeated imports and plugin registrations reuse the same server. If no loopback port
+  can be bound, the provider falls back to `https://api.meta.ai/v1` with a warning (the pre-0.6
+  behavior).
+- `AUTH_CONTRACT.md` points at `ADAPTER_CONTRACT.md` (v3) for the inference wire contract; the
+  pinned login values are unchanged.
+
+### Fixed
+
+- Meta's 403 `client_attestation_denied` no longer appears for requests that declare colliding flat
+  tool names while the adapter is running. The provider still classifies the refusal as a policy
+  block if Meta changes the gate.
+
 ## [0.5.0] - 2026-10-30
 
 ### Added
@@ -97,6 +134,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Probe-safe `register()` entry point for plugin discovery, with catalog handling and
   credential-secrecy tests.
 
+[0.6.0]: https://github.com/TheStreamCode/hermes-muse-code/releases/tag/v0.6.0
+[0.5.0]: https://github.com/TheStreamCode/hermes-muse-code/releases/tag/v0.5.0
 [0.4.0]: https://github.com/TheStreamCode/hermes-muse-code/releases/tag/v0.4.0
 [0.3.0]: https://github.com/TheStreamCode/hermes-muse-code/releases/tag/v0.3.0
 [0.2.2]: https://github.com/TheStreamCode/hermes-muse-code/releases/tag/v0.2.2

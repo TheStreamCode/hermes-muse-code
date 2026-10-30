@@ -139,6 +139,37 @@ def _clamp_effort(effort, supported):
     return max(below, key=_EFFORT_LADDER.index) if below else min(candidates, key=_EFFORT_LADDER.index)
 
 
+def _classify_client_restriction(error, *, status_code, error_code, message, body, model):
+    """Distinguish Meta's client restriction from a revoked credential."""
+    if status_code != 403:
+        return None
+    text = str(message or "").lower()
+    if error_code == "client_attestation_denied" or (
+        "muse code subscriptions cover requests from the muse code client only" in text
+    ):
+        return {
+            "reason": "provider_policy_blocked",
+            "retryable": False,
+            "should_rotate_credential": False,
+        }
+    return None
+
+
+def _run_browser_login(*, open_browser=True):
+    from .muse_code_login import main
+
+    return main([], open_browser=open_browser)
+
+
+def _auth_handler(action, args):
+    if action != "add":
+        return False
+    if _run_browser_login(open_browser=not getattr(args, "no_browser", False)) != 0:
+        raise SystemExit("Muse Code login failed.")
+    _ensure_subscription_key()
+    return True
+
+
 if _HERMES_AVAILABLE:
     _ensure_subscription_key()
     # Intentional parity copy of the bundled `meta-ai` provider profile: the
@@ -198,6 +229,8 @@ if _HERMES_AVAILABLE:
         env_vars=(ENV_VAR,),
         base_url=DEFAULT_BASE_URL,
         auth_type="api_key",
+        auth_handler=_auth_handler,
+        classify_api_error=_classify_client_restriction,
         # Responses API engages Muse prompt caching; same wire as meta-ai.
         api_mode="codex_responses",
         supports_vision=True,

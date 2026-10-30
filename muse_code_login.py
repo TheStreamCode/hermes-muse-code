@@ -15,6 +15,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import webbrowser
 
 CLIENT_ID = "1031625952748946"
 DEVICE_URL = "https://auth.meta.com/oidc/device/authorization/"
@@ -25,6 +26,10 @@ AUTH_CONTRACT_VERSION = 1
 REQUEST_TIMEOUT_SECS = 25
 MIN_POLL_INTERVAL_SECS = 1.0
 SLOW_DOWN_INCREMENT_SECS = 5.0
+TOKEN_ERRORS = frozenset({
+    "access_denied", "expired_token", "invalid_grant", "invalid_client",
+    "unauthorized_client", "unsupported_grant_type", "invalid_request",
+})
 
 
 class LoginError(Exception):
@@ -47,15 +52,11 @@ def _post_form(url, params):
         with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECS) as response:
             return json.load(response), response.status
     except urllib.error.HTTPError as exc:
-        try:
-            detail = exc.read().decode("utf-8", "replace")[:300].strip()
-        except Exception:
-            detail = ""
-        raise LoginError(f"request to {url} failed: HTTP {exc.code} {detail}".strip())
+        raise LoginError(f"request to {url} failed: HTTP {exc.code}") from exc
     except LoginError:
         raise
     except Exception as exc:
-        raise LoginError(f"request to {url} failed: {exc}")
+        raise LoginError(f"request to {url} failed: {type(exc).__name__}") from exc
 
 
 def _post_form_lenient(url, params):
@@ -87,7 +88,7 @@ def _post_form_lenient(url, params):
         except Exception:
             return None, exc.code
     except Exception as exc:
-        raise LoginError(f"request to {url} failed: {exc}")
+        raise LoginError(f"request to {url} failed: {type(exc).__name__}") from exc
 
 
 def _post_json(url, payload, bearer):
@@ -107,15 +108,11 @@ def _post_json(url, payload, bearer):
         with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECS) as response:
             return json.load(response), response.status
     except urllib.error.HTTPError as exc:
-        try:
-            detail = exc.read().decode("utf-8", "replace")[:300].strip()
-        except Exception:
-            detail = ""
-        raise LoginError(f"request to {url} failed: HTTP {exc.code} {detail}".strip())
+        raise LoginError(f"request to {url} failed: HTTP {exc.code}") from exc
     except LoginError:
         raise
     except Exception as exc:
-        raise LoginError(f"request to {url} failed: {exc}")
+        raise LoginError(f"request to {url} failed: {type(exc).__name__}") from exc
 
 
 def device_authorize():
@@ -155,7 +152,8 @@ def poll_token(device_code, interval_seconds, expires_in_seconds):
             slow_downs += 1
             interval = max(MIN_POLL_INTERVAL_SECS, interval + SLOW_DOWN_INCREMENT_SECS)
         elif error != "authorization_pending":
-            raise LoginError(f"login failed: {error}")
+            detail = error if isinstance(error, str) and error in TOKEN_ERRORS else "unknown token error"
+            raise LoginError(f"login failed: {detail}")
         remaining = deadline - time.time()
         if remaining <= 0:
             break
@@ -216,7 +214,7 @@ def write_cache(credentials, path):
         pass  # Windows ACLs: file inherits user profile permissions
 
 
-def main(argv=None):
+def main(argv=None, *, open_browser=True):
     parser = argparse.ArgumentParser(description="Meta device-code login for muse-code")
     parser.add_argument("--cache", default=None, help="credential cache path")
     args = parser.parse_args(argv)
@@ -226,15 +224,21 @@ def main(argv=None):
     )
     try:
         device = device_authorize()
-        print(f"Open {device['verification_uri_complete'] or device['verification_uri']}")
+        url = device.get("verification_uri_complete") or device["verification_uri"]
+        print(f"Open {url}")
         print(f"Enter code: {device['user_code']}")
+        if open_browser:
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
         access = poll_token(device["device_code"], device["interval"], device["expires_in"])
         credentials = mint_key(access)
         write_cache(credentials, cache)
     except LoginError as exc:
         print(f"Login failed: {exc}", file=sys.stderr)
         return 1
-    print(f"Logged in as {credentials.get('email') or credentials['accountId']} (key cached, never printed)")
+    print("Signed in. Model access depends on Meta's subscription policy.")
     return 0
 
 

@@ -6,10 +6,9 @@ Muse Spark in Hermes Agent billed to the Muse Code subscription
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/TheStreamCode/hermes-muse-code)](https://github.com/TheStreamCode/hermes-muse-code/releases/latest)
 
-Provider plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent) that serves Meta
-Muse models through a Muse Code monthly subscription. Hermes' built-in Meta provider only accepts
-explicit API keys, so subscribers end up metered twice; this plugin reuses your own Meta login and
-bills the same models to the subscription you already pay for.
+Provider plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent) that signs in with
+a Muse Code subscription. A successful login does not guarantee model access: Meta may reject
+subscription requests from clients other than Muse Code.
 
 > **Unofficial and experimental.** This plugin uses a Muse Code subscription credential from
 > Hermes Agent. Meta's terms limit that credential to Muse Code, so this use may not be supported
@@ -27,25 +26,26 @@ Hermes processes after installing or after re-running the login script.
 
 ## Quick start
 
-1. Run the login script once. It prints a Meta URL and a code, and waits for the poll to finish:
+1. Start the Meta device login:
 
    ```powershell
-   python "$env:HERMES_HOME\plugins\muse-code-subscription\muse_code_login.py"
+   hermes auth add muse-code
    ```
 
-2. Open the printed URL, enter the printed code on the Meta page, and approve the login.
-3. Start a chat with the subscription provider, or pick it from the model picker:
+2. Approve the code in the browser. If the browser does not open, use the printed URL and code.
+3. Start a chat with the subscription provider, or pick it from the model picker. Sign in before
+   opening the picker: Hermes otherwise treats this provider as an API-key provider.
 
    ```powershell
    hermes chat -m muse-spark-1.3 --provider muse-code
    hermes model
    ```
 
-The login mints a stable, account-bound inference key and caches it locally. The cache stores
+The standalone login script remains available for existing installations. The login mints an
+account-bound inference key and caches it locally. The cache stores
 exactly `apiKey`, `accountId`, and `email`; the OAuth access token from the login flow is kept in
-memory only and never written to disk. The key is never printed. Re-run the login only if access
-is revoked (401): the mint endpoint is aggressively rate-limited, so the plugin never re-mints on
-its own.
+memory only and never written to disk. The key is never printed. A 401 may indicate a revoked key;
+the mint endpoint is rate-limited, so the plugin never re-mints on its own.
 
 ## Features
 
@@ -94,13 +94,20 @@ Muse Code CLI session. See [SECURITY.md](SECURITY.md) for vulnerability reportin
 
 ### The provider shows as unconfigured
 
-No completed login was found. Run the login script above; a missing or empty cache means no login
-has completed yet. Confirm that the script ran with the same `HERMES_HOME` as the Hermes process.
+No completed login was found. Run `hermes auth add muse-code`; a missing or empty cache means no
+login has completed yet. Confirm that the login used the same `HERMES_HOME` as the Hermes process.
 
 ### 401 from the API
 
-Access was revoked or rotated. Re-run the login script once. Do not loop the script: the mint
-endpoint is rate-limited.
+The key may have been revoked or rotated. Run `hermes auth add muse-code` once. Do not repeat the
+login in a loop: the mint endpoint is rate-limited.
+
+### Meta rejects subscription requests from this client
+
+Meta may return a 403 mentioning `client_attestation_denied` or that Muse Code subscriptions cover
+the Muse Code client only. This is a client restriction, not evidence of an expired key. Signing in
+again does not remove the restriction. Use Muse Code for the subscription, or a separate
+pay-as-you-go Meta Model API key for other clients, subject to Meta's terms.
 
 ### The gateway keeps using the old key
 

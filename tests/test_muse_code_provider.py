@@ -2,12 +2,14 @@
 imports stubbed, network mocked. No hermes install, Meta account, or
 network needed."""
 
+import importlib
 import importlib.util
 import io
 import json
 import os
 import sys
 import types
+import urllib.error
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
@@ -120,6 +122,65 @@ def test_provider_registered_with_expected_wiring(tmp_path, monkeypatch):
     assert profile.auth_type == "api_key"
     assert profile.env_vars == ("MUSE_CODE_SUB_TOKEN",)
     assert profile.fallback_models == ("muse-spark-1.3",)
+
+
+def test_client_restriction_is_not_classified_as_invalid_auth(tmp_path, monkeypatch):
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "absent.json"))
+    _, registered = _load_plugin()
+    classify = registered["muse-code"].classify_api_error
+    refusal = classify(
+        None,
+        status_code=403,
+        error_code="client_attestation_denied",
+        message="Muse Code subscriptions cover requests from the Muse Code client only.",
+        body={},
+        model="muse-spark-1.3",
+    )
+    assert refusal["reason"] == "provider_policy_blocked"
+    assert refusal["retryable"] is False
+    assert refusal["should_rotate_credential"] is False
+    assert classify(None, status_code=401, error_code="invalid_api_key", message="invalid key", body={}, model="") is None
+    assert classify(None, status_code=403, error_code="other", message="forbidden", body={}, model="") is None
+
+
+def test_auth_add_uses_browser_login_without_an_api_key_prompt(tmp_path, monkeypatch):
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "cache.json"))
+    module, registered = _load_plugin()
+    calls = []
+    monkeypatch.setattr(module, "_run_browser_login", lambda **kwargs: calls.append(kwargs) or 0)
+    handler = registered["muse-code"].auth_handler
+    assert handler("add", types.SimpleNamespace(no_browser=True)) is True
+    assert calls == [{"open_browser": False}]
+    assert handler("status", types.SimpleNamespace()) is False
+
+
+def test_failed_auth_add_does_not_fall_back_to_an_api_key_prompt(tmp_path, monkeypatch):
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "cache.json"))
+    module, registered = _load_plugin()
+    monkeypatch.setattr(module, "_run_browser_login", lambda **kwargs: 1)
+    with pytest.raises(SystemExit):
+        registered["muse-code"].auth_handler("add", types.SimpleNamespace())
+
+
+def test_auth_handler_runs_the_device_flow_and_updates_the_cache(tmp_path, monkeypatch, capsys):
+    cache = tmp_path / "cache.json"
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(cache))
+    module, registered = _load_plugin()
+    with patch.dict(sys.modules, {module.__name__: module}):
+        login = importlib.import_module(f"{module.__name__}.muse_code_login")
+        monkeypatch.setattr(login.urllib.request, "urlopen", _urlopen_script(
+            DEVICE_OK, {"access_token": "dca-new"}, KEY_OK,
+        ))
+        opened = []
+        monkeypatch.setattr(login.webbrowser, "open", lambda url: opened.append(url))
+        assert registered["muse-code"].auth_handler("add", types.SimpleNamespace()) is True
+    assert opened == [DEVICE_OK["verification_uri_complete"]]
+    assert json.loads(cache.read_text())["apiKey"] == "LLM|fresh"
+    assert os.environ["MUSE_CODE_SUB_TOKEN"] == "LLM|fresh"
+    output = capsys.readouterr().out
+    assert "ABCD-EFGH" in output
+    assert "LLM|fresh" not in output
+    assert "user@example.com" not in output
 
 
 def test_cached_key_resolution(tmp_path, monkeypatch):
@@ -344,7 +405,7 @@ def test_full_login_flow_writes_cache(tmp_path):
         with patch.object(login.time, "sleep", lambda s: None):
             out = io.StringIO()
             with redirect_stdout(out):
-                assert login.main(["--cache", cache]) == 0
+                assert login.main(["--cache", cache], open_browser=False) == 0
     assert "ABCD-EFGH" in out.getvalue()
     assert "LLM|fresh" not in out.getvalue()  # secrets never printed
     raw = open(cache).read()
@@ -356,6 +417,20 @@ def test_full_login_flow_writes_cache(tmp_path):
         "accountId": "uid-1",
         "email": "user@example.com",
     }
+
+
+def test_login_without_complete_uri_or_browser_opener(tmp_path, monkeypatch, capsys):
+    login = _load_login()
+    device = {key: value for key, value in DEVICE_OK.items() if key != "verification_uri_complete"}
+    monkeypatch.setattr(login.urllib.request, "urlopen", _urlopen_script(
+        device, {"access_token": "dca-new"}, KEY_OK,
+    ))
+    def unavailable(_url):
+        raise OSError("browser unavailable")
+
+    monkeypatch.setattr(login.webbrowser, "open", unavailable)
+    assert login.main(["--cache", str(tmp_path / "cache.json")]) == 0
+    assert device["verification_uri"] in capsys.readouterr().out
 
 
 def test_login_rejects_inactive_subscription():
@@ -370,6 +445,23 @@ def test_login_rejects_inactive_subscription():
                 assert "inactive" in str(exc)
             else:
                 raise AssertionError("expected LoginError")
+
+
+def test_login_does_not_echo_error_response_bodies(tmp_path, monkeypatch, capsys):
+    login = _load_login()
+    error = urllib.error.HTTPError(
+        login.DEVICE_URL, 403, "Forbidden", {}, io.BytesIO(b'{"error":"sensitive-sentinel"}'),
+    )
+    monkeypatch.setattr(login.urllib.request, "urlopen", _urlopen_script(error))
+    assert login.main(["--cache", str(tmp_path / "cache.json")], open_browser=False) == 1
+    assert "sensitive-sentinel" not in capsys.readouterr().err
+
+
+def test_poll_does_not_echo_unrecognized_token_errors(monkeypatch):
+    login = _load_login()
+    monkeypatch.setattr(login.urllib.request, "urlopen", _urlopen_script({"error": "sensitive-sentinel"}))
+    with pytest.raises(login.LoginError, match="unknown token error"):
+        login.poll_token("device", 1, 600)
 
 
 def test_login_requires_payment_action():

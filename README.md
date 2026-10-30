@@ -154,7 +154,9 @@ other clients, subject to Meta's terms.
 ### The gateway keeps using the old key
 
 The cache is read once per process. `hermes chat` always sees a fresh login, but long-lived
-gateway workers must be restarted after re-running the login script.
+gateway workers must be restarted after re-running the login script. The same applies after
+`hermes plugins update muse-code-subscription`: the running gateway keeps the previous plugin
+version until it is restarted with `hermes gateway restart --yes`.
 
 ### Requests fail with 402 billing_not_configured
 

@@ -21,8 +21,8 @@ subscription requests from clients other than Muse Code.
 hermes plugins install TheStreamCode/hermes-muse-code --enable
 ```
 
-Hermes loads the provider from `$HERMES_HOME/plugins/muse-code-subscription`. Restart long-lived
-Hermes processes after installing or after re-running the login script.
+Hermes loads the provider from `$HERMES_HOME/plugins/muse-code-subscription`; restart long-lived
+Hermes processes after installing or re-running the login script.
 
 ## Quick start
 
@@ -33,63 +33,44 @@ Hermes processes after installing or after re-running the login script.
    ```
 
 2. Approve the code in the browser. If the browser does not open, use the printed URL and code.
-3. Start a chat with the subscription provider, or pick it from the model picker. Sign in before
-   opening the picker: Hermes otherwise treats this provider as an API-key provider.
+3. Sign in before opening the model picker (Hermes otherwise treats this provider as an API-key
+   provider), then start a chat:
 
    ```powershell
    hermes chat -m muse-spark-1.3 --provider muse-code
    hermes model
    ```
 
-The standalone login script remains available for existing installations. The login mints an
-account-bound inference key and caches it locally. The cache stores
-exactly `apiKey`, `accountId`, and `email`; the OAuth access token from the login flow is kept in
-memory only and never written to disk. The key is never printed. A 401 may indicate a revoked key;
-the mint endpoint is rate-limited, so the plugin never re-mints on its own.
+The login mints an account-bound inference key and caches it locally (a standalone login script
+remains for existing installations). The cache stores exactly `apiKey`, `accountId`, and `email`;
+the OAuth access token stays in memory, never on disk, and the key is never printed. A 401 may
+mean a revoked key: run the login once more, but do not loop, since the mint endpoint is
+rate-limited and the plugin never re-mints on its own.
 
 ## Features
 
-- Registers a `muse-code` provider over the Responses API, the same wire as the bundled Meta
-  provider, so prompt caching applies. Inference goes through a local loopback wire adapter that
-  forwards to `https://api.meta.ai/v1`.
+- Registers a `muse-code` provider over the Responses API (the bundled Meta provider's wire, so
+  prompt caching applies), forwarding inference through a loopback adapter to
+  `https://api.meta.ai/v1`.
 - Runs the wire adapter (`muse_adapter.py`, `127.0.0.1` only, first free port of 43219-43222):
-  it aliases only the client tool names that collide with Muse Code's builtin tool names (the full
-  pinned set is in [ADAPTER_CONTRACT.md](ADAPTER_CONTRACT.md)), restores them in streamed and JSON
-  responses, and normalizes the Meta Responses parameters (`tool_choice`, reasoning effort,
-  output-token floor, encrypted-reasoning include). If Meta still refuses the request, the adapter retries once
-  with every tool aliased. `MUSE_CODE_ADAPTER=off` keeps the proxy but disables the reshaping.
-- Owns the Meta device-code login (RFC 8628); authentication is an explicit, user-driven step, and
-  no third-party CLI is required or invoked.
-- Discovers models live from your account catalog: every returned model id is served except the
-  endpoint families verified as non-chat (`sam-*`, `muse-image-*`, `muse-voice-*`), so newly
-  published models appear with no plugin update.
-- Exports the cached key as `MUSE_CODE_SUB_TOKEN` in the process environment and refreshes it when
-  the cache changes; an explicit value always wins.
-- Keeps the credential cache owner-only and never persists the OAuth access token.
+  it renames colliding client tool declarations to `client_<name>`, restores them in
+  responses, and normalizes the Responses parameters Meta requires. If Meta still refuses,
+  it retries once with every tool renamed. `MUSE_CODE_ADAPTER=off` keeps the proxy but disables
+  the reshaping. Rules are pinned in [ADAPTER_CONTRACT.md](ADAPTER_CONTRACT.md).
+- Owns the Meta device-code login (RFC 8628): explicit, user-driven authentication with no
+  third-party CLI.
+- Serves every model id from your live account catalog except the verified non-chat endpoint
+  families (`sam-*`, `muse-image-*`, `muse-voice-*`), so new models appear with no plugin
+  update.
+- Exports the cached key as `MUSE_CODE_SUB_TOKEN`, refreshed on cache changes; an explicit value
+  always wins.
 - Runs stdlib-only: no runtime dependencies beyond the Hermes host.
-
-## Wire compatibility layer
-
-Meta's Responses endpoint accepts the Muse Code subscription credential only for requests whose
-declared flat tool names differ from Muse Code's builtin names. The plugin therefore starts a
-loopback reverse proxy (`muse_adapter.py`) on `127.0.0.1` when it loads. It renames exactly the
-colliding tool declarations to `client_<name>` (with `_2`, `_3`, ... when that alias is already
-taken), restores the original names in streamed and JSON responses, repairs empty function-call
-arguments from the streamed deltas, and normalizes four Responses parameters Meta requires
-(`tool_choice` to `auto`, `reasoning_effort` to `reasoning.effort`, an output-token floor of 16, and
-`reasoning.encrypted_content` in `include`). Other paths, fields and headers are relayed unchanged.
-
-This is a compatibility layer for the Meta Responses wire format, not an authentication change: the
-`Authorization` header is forwarded untouched and no credential, token or signature is created.
-`ADAPTER_CONTRACT.md` pins the rules; `MUSE_CODE_ADAPTER=off` keeps the loopback proxy but disables
-the reshaping. The adapter shuts down with the process.
 
 ## Requirements
 
 - Hermes Agent `>= 0.22.0` with model-provider plugin discovery.
-- Python 3.11 or newer for the one-time login script; the script uses the standard library only.
+- Python 3.11 or newer for the stdlib-only one-time login script.
 - An active Muse Code subscription on the Meta account used at login.
-- CI runs the unit suite on Python 3.11 and the local plugin validator.
 
 ## Configuration
 
@@ -97,83 +78,68 @@ the reshaping. The adapter shuts down with the process.
 | --- | --- | --- |
 | `MUSE_CODE_SUB_TOKEN` | Explicit subscription key. Wins over the cache; set it to pin a key manually. | from the login cache |
 | `MUSE_CODE_SUB_CREDENTIALS` | Overrides the path of the credential cache. | `$HERMES_HOME/muse-code-sub.json` |
-| `MUSE_CODE_ADAPTER` | `off` keeps the local proxy but disables the tool-name reshaping and parameter normalization. | unset |
+| `MUSE_CODE_ADAPTER` | `off` keeps the proxy but disables the reshaping and normalization. | unset |
 
-Select the provider as `muse-code` in `hermes model`, or pass `--provider muse-code` to
-`hermes chat`. The provider base URL is the loopback adapter's `/v1` origin
-(`http://127.0.0.1:<port>/v1`), which forwards to `https://api.meta.ai/v1`; there is no
-user-facing endpoint override (`META_BASE_URL` is ignored). If no loopback port can be bound, the
-provider falls back to the direct `https://api.meta.ai/v1` endpoint and logs a warning.
+Select the `muse-code` provider in `hermes model` or via `--provider muse-code`. The
+provider base URL is the loopback adapter's `/v1` origin (`http://127.0.0.1:<port>/v1`),
+forwarding to `https://api.meta.ai/v1`; there is no endpoint override (`META_BASE_URL` is
+ignored). If no loopback port binds, the provider falls back to `https://api.meta.ai/v1`
+directly and logs a warning.
 
 ## Privacy and security
 
-The subscription key lives owner-only in the local credential cache and in process memory; it is
-never logged and never written to a configuration file. The plugin talks only to `auth.meta.com`
-for the device login and to `api.meta.ai` for key minting and inference. Inference requests pass
-through the local wire adapter, which listens on `127.0.0.1` only, forwards the `Authorization`
-header unchanged, and never reads, stores or logs credentials, request bodies or response bodies;
-its optional debug line carries only the method, the path, the upstream status and the count of
-adapted tool names. The cache stores `apiKey`, `accountId`, and `email`; nothing else is read back.
+The subscription key lives owner-only in the local cache and process memory; it is never logged
+or written to a configuration file. Network use is limited to `auth.meta.com` (device login) and
+`api.meta.ai` (key minting, inference). The local adapter listens on `127.0.0.1` only, forwards
+`Authorization` unchanged, and never reads, stores, or logs credentials or bodies; its optional
+debug line carries only the method, path, status, and adapted-tool count.
 
 To remove access, delete `$HERMES_HOME/muse-code-sub.json` (or the path in
-`MUSE_CODE_SUB_CREDENTIALS`) and restart Hermes. Run `muse logout` if you also want to clear the
-Muse Code CLI session. See [SECURITY.md](SECURITY.md) for vulnerability reporting,
-[AUTH_CONTRACT.md](AUTH_CONTRACT.md) for the pinned login contract, and
-[ADAPTER_CONTRACT.md](ADAPTER_CONTRACT.md) for the inference wire rules.
+`MUSE_CODE_SUB_CREDENTIALS`) and restart Hermes. Run `muse logout` to also clear the Muse Code
+CLI session. See [SECURITY.md](SECURITY.md) for vulnerability reporting,
+[AUTH_CONTRACT.md](AUTH_CONTRACT.md) (login), and [ADAPTER_CONTRACT.md](ADAPTER_CONTRACT.md)
+(wire rules).
 
 ## Troubleshooting
 
 ### The provider shows as unconfigured
 
-No completed login was found. Run `hermes auth add muse-code`; a missing or empty cache means no
-login has completed yet. Confirm that the login used the same `HERMES_HOME` as the Hermes process.
+No completed login was found: run `hermes auth add muse-code`. A missing or empty cache means no
+login completed yet under the same `HERMES_HOME` as the Hermes process.
 
-### 401 from the API
+### Meta rejects requests from this client
 
-The key may have been revoked or rotated. Run `hermes auth add muse-code` once. Do not repeat the
-login in a loop: the mint endpoint is rate-limited.
+A 403 with `client_attestation_denied` means Meta applied its client restriction (Muse Code
+subscriptions cover the Muse Code client only). The wire adapter normally renames the colliding
+tool names away; if the refusal persists, one of these is true:
 
-### Meta rejects subscription requests from this client
+- the adapter is out of the path: no loopback port bound (the plugin log names the failure),
+  `MUSE_CODE_ADAPTER=off` is set, or an older plugin version is still loaded;
+- a `base_url` under `model:` in `$HERMES_HOME/config.yaml` (written by the `hermes model`
+  picker) overrides the provider profile and bypasses the adapter. Remove the `model.base_url`
+  line, keep `model.provider: muse-code`, and restart the gateway;
+- Meta changed the gate to a real per-client signature, which nothing in this plugin can forge;
+  the subscription then cannot be used from Hermes.
 
-A 403 mentioning `client_attestation_denied` or that Muse Code subscriptions cover the Muse Code
-client only means Meta applied its client restriction to the request. The plugin's loopback wire
-adapter exists for exactly this case: it aliases the client tool names that collide with Muse
-Code's builtin names, so the refusal should no longer appear for them. If it still does, one of
-these is true:
+Signing in again cannot remove a client restriction (the key is not expired). Use Muse Code for
+the subscription, or a separate pay-as-you-go Meta Model API key for other clients, subject to
+Meta's terms.
 
-- the adapter could not bind a loopback port, the plugin log names the failure, and the provider
-  fell back to the direct endpoint;
-- `MUSE_CODE_ADAPTER=off` is set, or an older plugin version is still loaded;
-- Meta changed the gate, for example to a real per-client signature. Nothing in this plugin can
-  forge a signature, so in that case the subscription cannot be used from Hermes.
+### The gateway keeps the old key
 
-The refusal is a client restriction, not evidence of an expired key: signing in again does not
-remove it. Use Muse Code for the subscription, or a separate pay-as-you-go Meta Model API key for
-other clients, subject to Meta's terms.
-
-### The gateway keeps using the old key
-
-The cache is read once per process. `hermes chat` always sees a fresh login, but long-lived
-gateway workers must be restarted after re-running the login script. The same applies after
-`hermes plugins update muse-code-subscription`: the running gateway keeps the previous plugin
-version until it is restarted with `hermes gateway restart --yes`.
+The cache is read once per process: `hermes chat` always sees a fresh login, but restart gateway
+workers after each login. After `hermes plugins update muse-code-subscription`,
+likewise restart: the running gateway keeps the previous plugin version until `hermes gateway
+restart --yes`.
 
 ### Requests fail with 402 billing_not_configured
 
-An explicit `MUSE_CODE_SUB_TOKEN` wins over the key minted by the subscription login, by design. If
-it is set in the process environment or in `$HERMES_HOME/.env` to an old Meta API key (for example
-a pay-as-you-go key), Meta answers `402 billing_not_configured` for that key and the subscription
-key is never used. Remove the line from `.env` (or from the shell profile) so the plugin exports
-the minted key, remove any pooled credential created from it with `hermes auth remove muse-code
-<id>`, then restart the gateway with `hermes gateway restart --yes`. `hermes auth status muse-code`
-shows the resolved state.
-
-### The provider still calls api.meta.ai directly
-
-A `base_url` under `model:` in `$HERMES_HOME/config.yaml` overrides the provider profile, so the
-loopback adapter is bypassed and the client restriction returns. The `hermes model` provider picker
-writes that field. Remove the `model.base_url` line and restart the gateway; the plugin's profile
-then supplies the adapter URL. Keep `model.provider: muse-code` and the default model.
+An explicit `MUSE_CODE_SUB_TOKEN` wins over the minted key, by design. If the environment
+or `$HERMES_HOME/.env` sets it to an old Meta API key (for example a pay-as-you-go key), Meta
+answers `402 billing_not_configured` and the subscription key is never used. Remove that line so
+the plugin exports the minted key, drop any pooled credential made from it (`hermes auth remove
+muse-code <id>`), then run `hermes gateway restart --yes`. `hermes auth status muse-code` shows
+the resolved state.
 
 ## Development
 
@@ -187,15 +153,15 @@ python .github/scripts/validate-plugin.py --path .
 ruff check .
 ```
 
-The unit suite is hermetic: Hermes imports are stubbed, network calls are mocked, and no Meta
-account is needed. CI runs the unit suite, the local plugin validator, and `ruff`. The plugin
-stays stdlib-only by design; do not add third-party runtime dependencies.
+The hermetic unit suite stubs Hermes imports and mocks network calls, so no Meta account is
+needed. CI runs the unit suite on Python 3.11, the local plugin validator, and `ruff`. The
+plugin stays stdlib-only; do not add third-party runtime dependencies.
 
 ## Support
 
 Usage questions and workflows belong in GitHub Discussions; reproducible defects belong in GitHub
-Issues using the bug report form. See [SUPPORT.md](SUPPORT.md). Problems that also reproduce
-without this provider belong to the
+Issues (bug report form; see [SUPPORT.md](SUPPORT.md)). Problems that also reproduce without this
+provider belong to the
 [Hermes Agent project](https://github.com/NousResearch/hermes-agent/issues). The plugin cannot
 obtain, restore, or protect a Meta account, subscription, or credential.
 
@@ -205,8 +171,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Pull requests must pass the required CI 
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE). The software is provided "as is"; see
-[DISCLAIMER.md](DISCLAIMER.md) for the risk notice and liability terms. Flow parameters are
+MIT — see [`LICENSE`](LICENSE); the software is provided "as is" (see
+[DISCLAIMER.md](DISCLAIMER.md) for the risk notice and liability terms). Flow parameters are
 compatible with the published behavior of oh-my-pi (MIT); see [NOTICE](NOTICE).
 
 ---

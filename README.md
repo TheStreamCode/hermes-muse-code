@@ -1,4 +1,4 @@
-# hermes-muse-code
+# Muse Spark for Hermes Agent
 
 Muse Spark in Hermes Agent billed to the Muse Code subscription
 
@@ -178,5 +178,4 @@ compatible with the published behavior of oh-my-pi (MIT); see [NOTICE](NOTICE).
 ---
 
 Maintained by [Michael Gasperini (Mikesoft)](https://mikesoft.it).
-If this project is useful to you, consider
-[sponsoring its maintenance](https://github.com/sponsors/TheStreamCode).
+If this project is useful to you, consider [sponsoring its maintenance](https://github.com/sponsors/TheStreamCode).

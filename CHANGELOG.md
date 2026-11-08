@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `MuseCodeSubscriptionProfile.runtime_base_url()` now returns the loopback adapter URL.
+  Hermes resolves the runtime inference base URL through that hook, so without the override
+  `profile.base_url` was never read: every subscription request went straight to
+  `api.meta.ai` and Meta answered 403 `client_attestation_denied`.
+
 ## [0.6.0] - 2026-10-30
 
 ### Added

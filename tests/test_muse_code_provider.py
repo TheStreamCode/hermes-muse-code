@@ -206,6 +206,22 @@ def test_base_url_uses_the_loopback_adapter(tmp_path, monkeypatch):
     assert "attacker.test" not in base_url
 
 
+def test_runtime_base_url_returns_the_adapter(tmp_path, monkeypatch):
+    """Runtime credential resolution must be routed through the adapter.
+
+    ``ProviderProfile.runtime_base_url`` is the only hook Hermes reads when it
+    builds the inference base URL; without the override every request bypasses
+    the adapter and Meta answers 403.
+    """
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
+    _, registered = _load_plugin()
+    profile = registered["muse-code"]
+    assert profile.runtime_base_url(
+        api_key="LLM|k", default="https://api.meta.ai/v1", env_url=""
+    ) == profile.base_url
+    assert re.fullmatch(r"http://127\.0\.0\.1:\d+/v1", profile.base_url)
+
+
 def test_adapter_bind_failure_falls_back_to_the_direct_endpoint(
     tmp_path, monkeypatch, caplog
 ):
@@ -229,6 +245,9 @@ def test_adapter_bind_failure_falls_back_to_the_direct_endpoint(
         else:
             sys.modules[submodule] = real
     assert registered["muse-code"].base_url == "https://api.meta.ai/v1"
+    assert registered["muse-code"].runtime_base_url(
+        api_key="LLM|k", default="https://api.meta.ai/v1", env_url=""
+    ) == "https://api.meta.ai/v1"
     assert "adapter" in caplog.text.lower()
 
 

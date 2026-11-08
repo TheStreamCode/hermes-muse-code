@@ -232,6 +232,19 @@ if _HERMES_AVAILABLE:
         # plugin update; only a brand-new non-chat family needs an entry here.
         _NON_CHAT_PREFIXES = ("sam-", "muse-image-", "muse-voice-")
 
+        def runtime_base_url(
+            self, *, api_key: str, default: str, env_url: str
+        ) -> str | None:
+            """Point runtime inference at the loopback wire adapter.
+
+            Runtime credential resolution only reads this hook, so without the
+            override ``base_url`` is never consulted: requests go straight to
+            ``api.meta.ai`` and Meta answers 403. ``register()`` keeps
+            ``self.base_url`` on the adapter, or on the direct endpoint when the
+            adapter could not bind.
+            """
+            return self.base_url or None
+
         def fetch_models(
             self,
             *,

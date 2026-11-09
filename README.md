@@ -62,6 +62,10 @@ rate-limited and the plugin never re-mints on its own.
 - Serves every model id from your live account catalog except the verified non-chat endpoint
   families (`sam-*`, `muse-image-*`, `muse-voice-*`), so new models appear with no plugin
   update.
+- Ships a static fallback list for processes where the live catalog probe cannot run (for
+  example a worker without a readable login cache). Hermes merges it with the live results and
+  deduplicates, so the same ids appear either way. `muse-wonder-full-1.0` (Power/Maximum tier) is
+  deliberately absent, so the fallback never advertises a model most subscriptions cannot use.
 - Exports the cached key as `MUSE_CODE_SUB_TOKEN`, refreshed on cache changes; an explicit value
   always wins.
 - Runs stdlib-only: no runtime dependencies beyond the Hermes host.
@@ -99,6 +103,14 @@ To remove access, delete `$HERMES_HOME/muse-code-sub.json` (or the path in
 CLI session. See [SECURITY.md](SECURITY.md) for vulnerability reporting,
 [AUTH_CONTRACT.md](AUTH_CONTRACT.md) (login), and [ADAPTER_CONTRACT.md](ADAPTER_CONTRACT.md)
 (wire rules).
+
+### Contributor-tier models
+
+The catalog also lists `*-contributor` variants. Meta offers them at a lower quota in exchange for
+using that traffic as training data; they are not a free upgrade of the standard model, and the
+choice is the account holder's. The plugin never selects one on its own: background work (title
+generation, compression) runs on whatever model you picked, so picking a contributor model
+extends that consent to those calls too. Pick the plain id when you want the standard tier.
 
 ## Troubleshooting
 

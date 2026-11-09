@@ -300,7 +300,22 @@ if _HERMES_AVAILABLE:
         # default_aux_model intentionally unset (= main model): the bundled
         # profile's contributor-tier default would silently opt background
         # compression into data training.
-        fallback_models=("muse-spark-1.3",),
+        # Static list so a picker (Settings -> Model) always has models to
+        # show even when the live probe cannot run in that process: a single
+        # or empty fallback renders as "Could not load models" and blocks
+        # Apply. Mirrors the chat ids GET /v1/models returns on a standard
+        # subscription; muse-wonder-full-1.0 (Power/Maximum tier) is excluded
+        # so the fallback never advertises a model most subscribers cannot
+        # use. Live discovery still wins when it can run.
+        fallback_models=(
+            "muse-wonder-1.0",
+            "muse-wonder-1.0-contributor",
+            "muse-spark-1.3",
+            "muse-spark-1.3-contributor",
+            "muse-spark-1.2",
+            "muse-spark-1.2-contributor",
+            "muse-spark-1.1",
+        ),
     )
 
     register_provider(muse_code)

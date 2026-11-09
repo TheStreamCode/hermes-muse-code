@@ -300,13 +300,13 @@ if _HERMES_AVAILABLE:
         # default_aux_model intentionally unset (= main model): the bundled
         # profile's contributor-tier default would silently opt background
         # compression into data training.
-        # Static list so a picker (Settings -> Model) always has models to
-        # show even when the live probe cannot run in that process: a single
-        # or empty fallback renders as "Could not load models" and blocks
-        # Apply. Mirrors the chat ids GET /v1/models returns on a standard
-        # subscription; muse-wonder-full-1.0 (Power/Maximum tier) is excluded
-        # so the fallback never advertises a model most subscribers cannot
-        # use. Live discovery still wins when it can run.
+        # Static fallback mirroring the chat ids GET /v1/models returns on a
+        # standard subscription. When the live catalog probe cannot run in a
+        # process, the picker shows only these ids, so any subscription model
+        # missing here is unselectable there; when the probe succeeds, Hermes
+        # prepends this curated list ahead of the live results.
+        # muse-wonder-full-1.0 (Power/Maximum tier) is excluded so the
+        # fallback never advertises a model most subscribers cannot use.
         fallback_models=(
             "muse-wonder-1.0",
             "muse-wonder-1.0-contributor",

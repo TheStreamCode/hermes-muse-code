@@ -136,12 +136,19 @@ def test_provider_registered_with_expected_wiring(tmp_path, monkeypatch):
     )
 
 
-def test_fallback_never_advertises_full_tier_models():
+def test_fallback_never_advertises_full_tier_models(tmp_path, monkeypatch):
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "absent.json"))
     _, registered = _load_plugin()
     fallback = registered["muse-code"].fallback_models
     assert fallback, "fallback list must not be empty"
     assert all(model.startswith("muse-") for model in fallback)
     assert "muse-wonder-full-1.0" not in fallback
+    # Both subscription families must be represented, and more than one
+    # model, so a probe-less process never degrades the picker to a single
+    # entry.
+    assert "muse-wonder-1.0" in fallback
+    assert "muse-spark-1.3" in fallback
+    assert len(fallback) > 1
 
 
 def test_client_restriction_is_not_classified_as_invalid_auth(tmp_path, monkeypatch):

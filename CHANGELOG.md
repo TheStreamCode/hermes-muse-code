@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.2] - 2026-11-10
 
 ### Fixed
 
@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `muse-spark-1.3`. A process where the live catalog probe cannot run shows
   only the fallback ids in the model picker, so the previous single-model
   fallback left every other subscription model unselectable there.
+
+### Documented
+
+- The README explains the static fallback (and why `muse-wonder-full-1.0` is absent) and what
+  selecting a `*-contributor` model implies: the lower quota is paid with training data, and
+  background work inherits whichever model was picked.
 
 ## [0.6.1] - 2026-11-08
 

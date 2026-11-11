@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `requires_hermes` is now `>= 0.23.0`, matching the requirement in the Hermes plugin catalog. The
+  provider hooks the plugin uses are unchanged and still exist in 0.22; only the declared floor
+  moved, so catalog installs and the manifest now agree.
+
 ## [0.6.2] - 2026-11-10
 
 ### Fixed

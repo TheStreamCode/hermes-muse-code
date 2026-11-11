@@ -72,7 +72,7 @@ rate-limited and the plugin never re-mints on its own.
 
 ## Requirements
 
-- Hermes Agent `>= 0.22.0` with model-provider plugin discovery.
+- Hermes Agent `>= 0.23.0` with model-provider plugin discovery.
 - Python 3.11 or newer for the stdlib-only one-time login script.
 - An active Muse Code subscription on the Meta account used at login.
 

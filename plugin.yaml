@@ -6,6 +6,6 @@ author: TheStreamCode
 license: MIT
 homepage: https://github.com/TheStreamCode/hermes-muse-code
 tags: [meta, muse-spark, subscription]
-requires_hermes: ">=0.22.0"
+requires_hermes: ">=0.23.0"
 
 

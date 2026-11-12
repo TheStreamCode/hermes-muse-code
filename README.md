@@ -119,6 +119,10 @@ extends that consent to those calls too. Pick the plain id when you want the sta
 No completed login was found: run `hermes auth add muse-code`. A missing or empty cache means no
 login completed yet under the same `HERMES_HOME` as the Hermes process.
 
+If `hermes auth status muse-code` reports a login but chat says "No usable credentials found for
+provider 'muse-code'", the running Hermes has a plugin older than 0.6.4, which only exported the key
+inside the process that imported it. Update the plugin and restart the gateway.
+
 ### Meta rejects requests from this client
 
 A 403 with `client_attestation_denied` means Meta applied its client restriction (Muse Code
@@ -139,10 +143,12 @@ Meta's terms.
 
 ### The gateway keeps the old key
 
-The cache is read once per process: `hermes chat` always sees a fresh login, but restart gateway
-workers after each login. After `hermes plugins update muse-code-subscription`,
-likewise restart: the running gateway keeps the previous plugin version until `hermes gateway
-restart --yes`.
+Since 0.6.4 the provider reads the cache when Hermes resolves the credential, so a completed login
+is used by the next turn without a restart. Older versions exported the key only at import, which
+left workers that started before the login on the previous key or on none at all.
+
+Restart after `hermes plugins update muse-code-subscription`: the running gateway keeps the previous
+plugin version until `hermes gateway restart --yes`.
 
 ### Requests fail with 402 billing_not_configured
 

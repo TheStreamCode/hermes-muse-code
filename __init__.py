@@ -102,6 +102,21 @@ def _ensure_subscription_key() -> None:
         _ENV_KEY_OWNED = None
 
 
+def _explicit_env_key() -> str:
+    """``MUSE_CODE_SUB_TOKEN`` as a user set it (``.env`` first, then the environment).
+
+    Hermes prefers ``$HERMES_HOME/.env`` over a stale shell export; use its own
+    helper so this keeps that order instead of a bare ``os.getenv``.
+    """
+    try:
+        from agent.credential_pool import get_env_prefer_dotenv
+
+        value = get_env_prefer_dotenv(ENV_VAR)
+    except Exception:  # noqa: BLE001 - hook absent on older hosts or in a stub tree
+        value = os.getenv(ENV_VAR, "")
+    return (value or "").strip()
+
+
 def _adapter_base_url() -> str:
     """Start the loopback wire adapter once and return the provider base URL.
 
@@ -244,6 +259,25 @@ if _HERMES_AVAILABLE:
             adapter could not bind.
             """
             return self.base_url or None
+
+        def resolve_api_key_secret(self) -> tuple[str, str] | None:
+            """Hand Hermes the cached key directly instead of an env side effect.
+
+            ``_ensure_subscription_key`` fills ``MUSE_CODE_SUB_TOKEN`` at import,
+            in this process only: a resolver that runs elsewhere (a plugin-host
+            profile under ``plugins.isolation: host``, or a gateway that started
+            before the login) never observes it, and then the provider reports
+            "No usable credentials". The cache file has no such scope, so read it
+            here. An explicit env value that differs from the cache stays
+            authoritative: returning None leaves that value to core's ladder.
+            """
+            cached = read_cached_key()
+            if not cached:
+                return None
+            explicit = _explicit_env_key()
+            if explicit and explicit != cached:
+                return None
+            return cached, "muse-code-sub"
 
         def fetch_models(
             self,

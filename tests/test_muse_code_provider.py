@@ -220,6 +220,35 @@ def test_cached_key_resolution(tmp_path, monkeypatch):
     assert os.environ["MUSE_CODE_SUB_TOKEN"] == "LLM|k"
 
 
+def test_api_key_secret_hook_reads_the_cache(tmp_path, monkeypatch):
+    """The credential must come from the hook, not the env var it mirrors.
+
+    ``MUSE_CODE_SUB_TOKEN`` is only set in the process that imported the plugin:
+    a resolver running in another process (plugin-host profile) or in a gateway
+    that outlived the login never sees it and reports "No usable credentials".
+    """
+    cache = tmp_path / "cache.json"
+    cache.write_text(json.dumps({"apiKey": "LLM|seam"}))
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(cache))
+    _, registered = _load_plugin()
+    profile = registered["muse-code"]
+    assert profile.resolve_api_key_secret() == ("LLM|seam", "muse-code-sub")
+
+
+def test_api_key_secret_hook_leaves_an_explicit_env_value_alone(tmp_path, monkeypatch):
+    cache = tmp_path / "cache.json"
+    cache.write_text(json.dumps({"apiKey": "LLM|cached"}))
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(cache))
+    _, registered = _load_plugin(env={"MUSE_CODE_SUB_TOKEN": "LLM|explicit"})
+    assert registered["muse-code"].resolve_api_key_secret() is None
+
+
+def test_api_key_secret_hook_is_a_miss_without_a_cache(tmp_path, monkeypatch):
+    monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "absent.json"))
+    _, registered = _load_plugin()
+    assert registered["muse-code"].resolve_api_key_secret() is None
+
+
 def test_base_url_uses_the_loopback_adapter(tmp_path, monkeypatch):
     monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
     monkeypatch.setenv("META_BASE_URL", "https://attacker.test/v1")

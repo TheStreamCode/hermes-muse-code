@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Credential resolution reads the login cache through `ProviderProfile.resolve_api_key_secret()`
+  instead of relying on the `MUSE_CODE_SUB_TOKEN` export. The export only happens in the process
+  that imports the plugin, so under `plugins.isolation: host` (the profile runs as a host proxy) or
+  in a gateway that started before the login, Hermes reported "No usable credentials found for
+  provider 'muse-code'" while the cache held a valid key. An explicit `MUSE_CODE_SUB_TOKEN` that
+  differs from the cache still wins.
+
 ## [0.6.3] - 2026-11-11
 
 ### Changed

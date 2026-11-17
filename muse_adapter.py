@@ -507,7 +507,10 @@ class _AdapterHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("x-muse-adapter", str(ADAPTER_VERSION))
         self.end_headers()
-        self.wfile.write(payload)
+        try:
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler naming
         self._handle()

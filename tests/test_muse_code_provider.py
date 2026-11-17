@@ -117,13 +117,15 @@ def _urlopen_script(*steps):
 
 def test_provider_registered_with_expected_wiring(tmp_path, monkeypatch):
     monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "cache.json"))
+    before = getattr(sys, "_muse_code_adapter_state_v1", None)
+    before_active = getattr(before, "active", None)
     module, registered = _load_plugin()
     profile = registered["muse-code"]
     # The adapter starts on first resolution, not at import: loading the plugin
     # must not bind a loopback port that a short-lived probe process would orphan.
+    after_active = getattr(getattr(sys, "_muse_code_adapter_state_v1", None), "active", None)
+    assert after_active is before_active
     assert profile.base_url == module.DEFAULT_BASE_URL
-    state = getattr(sys, "_muse_code_adapter_state_v1", None)
-    assert state is None or state.active is None
     # Inference goes through the loopback wire adapter, not the direct endpoint.
     resolved = profile.runtime_base_url(
         api_key="LLM|k", default=module.DEFAULT_BASE_URL, env_url=""

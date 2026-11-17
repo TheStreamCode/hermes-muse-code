@@ -295,12 +295,11 @@ if _HERMES_AVAILABLE:
             timeout: float = 8.0,
         ) -> list[str] | None:
             _ensure_subscription_key()
-            # The catalog probe is a real upstream call: resolve the adapter
-            # first so discovery does not bypass it. Until the adapter starts,
-            # base_url is the direct endpoint, not the loopback URL.
-            _refresh_base_url()
+            # Discovery is a GET, which the adapter relays untouched, and Meta
+            # serves /v1/models directly (verified with a subscription key), so
+            # it does not need the loopback hop or a port binding.
             live = super().fetch_models(
-                api_key=api_key, base_url=base_url or self.base_url, timeout=timeout
+                api_key=api_key, base_url=base_url, timeout=timeout
             )
             if live is None:
                 return None

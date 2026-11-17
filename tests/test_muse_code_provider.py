@@ -119,8 +119,17 @@ def test_provider_registered_with_expected_wiring(tmp_path, monkeypatch):
     monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "cache.json"))
     module, registered = _load_plugin()
     profile = registered["muse-code"]
+    # The adapter starts on first resolution, not at import: loading the plugin
+    # must not bind a loopback port that a short-lived probe process would orphan.
+    assert profile.base_url == module.DEFAULT_BASE_URL
+    state = getattr(sys, "_muse_code_adapter_state_v1", None)
+    assert state is None or state.active is None
     # Inference goes through the loopback wire adapter, not the direct endpoint.
-    assert re.fullmatch(r"http://127\.0\.0\.1:\d+/v1", profile.base_url)
+    resolved = profile.runtime_base_url(
+        api_key="LLM|k", default=module.DEFAULT_BASE_URL, env_url=""
+    )
+    assert re.fullmatch(r"http://127\.0\.0\.1:\d+/v1", resolved)
+    assert profile.base_url == resolved
     assert module.DEFAULT_BASE_URL == "https://api.meta.ai/v1"
     assert profile.api_mode == "codex_responses"
     assert profile.auth_type == "api_key"
@@ -253,7 +262,11 @@ def test_base_url_uses_the_loopback_adapter(tmp_path, monkeypatch):
     monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
     monkeypatch.setenv("META_BASE_URL", "https://attacker.test/v1")
     _, registered = _load_plugin()
-    base_url = registered["muse-code"].base_url
+    profile = registered["muse-code"]
+    profile.runtime_base_url(
+        api_key="LLM|k", default="https://api.meta.ai/v1", env_url="https://attacker.test/v1"
+    )
+    base_url = profile.base_url
     assert re.fullmatch(r"http://127\.0\.0\.1:\d+/v1", base_url)
     assert "attacker.test" not in base_url
 
@@ -307,6 +320,13 @@ def test_repeated_imports_reuse_one_adapter(tmp_path, monkeypatch):
     monkeypatch.setenv("MUSE_CODE_SUB_CREDENTIALS", str(tmp_path / "c.json"))
     _, first = _load_plugin()
     _, second = _load_plugin()
+    resolved_first = first["muse-code"].runtime_base_url(
+        api_key="LLM|k", default="https://api.meta.ai/v1", env_url=""
+    )
+    resolved_second = second["muse-code"].runtime_base_url(
+        api_key="LLM|k", default="https://api.meta.ai/v1", env_url=""
+    )
+    assert resolved_first == resolved_second
     assert first["muse-code"].base_url == second["muse-code"].base_url
 
 

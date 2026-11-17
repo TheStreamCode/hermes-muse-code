@@ -130,3 +130,17 @@ retry is logged as `gate refused; retried with all N tools aliased`.
 - Offline: the adapter unit and proxy tests in each repository, against a fake upstream.
 - Live: start the adapter against `https://api.meta.ai`, send a request with a colliding tool
   name, and require HTTP 200 with the original name restored in the response.
+
+## Diagnostics (outside the wire rules)
+
+`GET /__muse_adapter/health` answers before the relay rules with
+`{adapter_version, pid, port, passthrough, upstream}`, and every relayed response carries
+`x-muse-adapter: <ADAPTER_VERSION>`. Both exist so a caller can tell whether a captured request
+went through an adapter at all and, when it did, whether that adapter is the one this process
+started: a port can be held by an adapter from an older plugin, by another process, or by
+something unrelated.
+
+These additions do not change any rule above, so `ADAPTER_VERSION` stays at 3. A refused request
+(HTTP 400 or above) also logs one line at the host's warning level with the method, path, status,
+adapter version, port, pid and the rules that fired. Neither the log line nor the health answer
+carries a request body, a response body, or a credential.

@@ -141,6 +141,25 @@ Signing in again cannot remove a client restriction (the key is not expired). Us
 the subscription, or a separate pay-as-you-go Meta Model API key for other clients, subject to
 Meta's terms.
 
+### Requests fail with "authentication failed"
+
+On hosts older than 0.23 a refused request and a bad key reach the user with the same
+`authentication failed` text: the 403 `client_attestation_denied` is not classified separately
+until 0.23. Do not re-login first; check which adapter answered.
+
+The adapter starts on first use, and every process owns its own instance, so a loopback port
+reported by one process is not necessarily the one in use now. Ask the port directly:
+
+```bash
+python muse_adapter.py --health http://127.0.0.1:43219/v1
+```
+
+It prints `adapter_version`, `pid`, `port`, `passthrough` and `upstream`, or says that no adapter
+answered. A port held by an adapter without this answer belongs to another process or to an older
+plugin, and that process is not the one serving the request. Every relayed response also
+carries `x-muse-adapter: <version>`, and each refused request logs one warning line with the method,
+path, upstream status, adapter version, port and pid, but no body and no credential.
+
 ### The gateway keeps the old key
 
 Since 0.6.4 the provider reads the cache when Hermes resolves the credential, so a completed login

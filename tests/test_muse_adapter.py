@@ -7,7 +7,9 @@ upstream, and the unit tests never touch a socket.
 import http.server
 import importlib.util
 import json
+import os
 import socket
+import subprocess
 import sys
 import threading
 import urllib.error
@@ -607,3 +609,156 @@ def test_a_busy_candidate_port_falls_through_to_the_next_one():
             running.close()
     finally:
         blocker.close()
+
+
+def _health_url(base_url):
+    return base_url.rsplit("/v1", 1)[0] + adapter.HEALTH_PATH
+
+
+def test_health_reports_which_adapter_owns_the_port(monkeypatch):
+    """A port can hold this process' adapter, an older one, or something else.
+
+    Without this answer a failing request gives no way to tell the three apart.
+    """
+    monkeypatch.delenv(adapter.PASSTHROUGH_ENV_VAR, raising=False)
+    running = adapter.start_adapter(ports=(0,))
+    try:
+        with urllib.request.urlopen(_health_url(running.base_url), timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+            assert response.headers.get("x-muse-adapter") == str(adapter.ADAPTER_VERSION)
+        assert payload == {
+            "adapter_version": adapter.ADAPTER_VERSION,
+            "pid": os.getpid(),
+            "port": running.port,
+            "passthrough": False,
+            "upstream": adapter.DEFAULT_UPSTREAM,
+        }
+    finally:
+        running.close()
+
+
+def test_a_foreign_listener_on_the_first_port_is_not_adopted():
+    """No process ever reuses another process' adapter as its own."""
+    blocker = socket.socket()
+    blocker.bind(("127.0.0.1", 0))
+    blocker.listen(1)
+    busy = blocker.getsockname()[1]
+    try:
+        running = adapter.start_adapter(ports=(busy, 0))
+        try:
+            assert running.port != busy
+            with urllib.request.urlopen(_health_url(running.base_url), timeout=5) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            assert payload["pid"] == os.getpid()
+            assert payload["port"] == running.port
+        finally:
+            running.close()
+    finally:
+        blocker.close()
+
+
+def test_relayed_responses_carry_the_adapter_version_header():
+    """A captured response says whether the loopback hop happened."""
+
+    def respond(record, handler):
+        payload = json.dumps({"ok": True}).encode("utf-8")
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Content-Length", str(len(payload)))
+        handler.end_headers()
+        handler.wfile.write(payload)
+
+    upstream = _FakeUpstream(respond)
+    running = adapter.start_adapter(upstream=upstream.origin, ports=(0,))
+    try:
+        with _post(f"{running.base_url}/responses", {"model": "muse-spark-1.3"}) as response:
+            assert response.headers.get("x-muse-adapter") == str(adapter.ADAPTER_VERSION)
+            assert json.load(response) == {"ok": True}
+    finally:
+        running.close()
+        upstream.close()
+
+
+def test_a_refused_request_is_logged_once_with_status_and_port(monkeypatch):
+    """Meta's refusal reaches the caller as a bare message; this line is the record."""
+    monkeypatch.delenv(adapter.PASSTHROUGH_ENV_VAR, raising=False)
+    lines = []
+
+    def respond(record, handler):
+        payload = json.dumps(
+            {
+                "error": {
+                    "code": "client_attestation_denied",
+                    "message": "secret-body-marker",
+                }
+            }
+        ).encode("utf-8")
+        handler.send_response(403)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Content-Length", str(len(payload)))
+        handler.end_headers()
+        handler.wfile.write(payload)
+
+    upstream = _FakeUpstream(respond)
+    running = adapter.start_adapter(
+        upstream=upstream.origin, ports=(0,), error_log=lines.append
+    )
+    try:
+        with pytest.raises(urllib.error.HTTPError) as refusal:
+            _post(
+                f"{running.base_url}/responses",
+                {
+                    "model": "muse-spark-1.3",
+                    "tools": [{"type": "function", "name": "read_file"}],
+                },
+            )
+        assert refusal.value.code == 403
+    finally:
+        running.close()
+        upstream.close()
+
+    assert len(lines) == 1
+    line = lines[0]
+    assert "403" in line
+    assert f"v{adapter.ADAPTER_VERSION}" in line
+    assert f"port={running.port}" in line
+    assert f"pid={os.getpid()}" in line
+    assert "secret-body-marker" not in line
+    assert "LLM|sentinel" not in line
+
+
+def test_the_health_cli_reports_a_listening_adapter():
+    running = adapter.start_adapter(ports=(0,))
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(ADAPTER_FILE), "--health", running.base_url],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    finally:
+        running.close()
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["port"] == running.port
+    assert payload["adapter_version"] == adapter.ADAPTER_VERSION
+
+
+def test_the_health_cli_reports_a_dead_port_instead_of_raising():
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    dead = probe.getsockname()[1]
+    probe.close()
+
+    completed = subprocess.run(
+        [sys.executable, str(ADAPTER_FILE), "--health", f"http://127.0.0.1:{dead}/v1"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert "no Muse Code adapter answered" in completed.stderr

@@ -5,6 +5,28 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The loopback wire adapter starts on first use instead of at import. Loading the plugin without
+  running inference (the admission probe, `hermes plugins validate`, a linter) no longer binds a
+  port, and `register()` no longer starts one either. Those probes exit immediately and used to
+  leave the listener behind, so the next process bound the following port and every process
+  reported a different base URL.
+- `runtime_base_url()` resolves the adapter on demand, so a process that never imported the plugin
+  at startup still gets its own loopback adapter when Hermes resolves the credential.
+
+### Added
+
+- `GET /__muse_adapter/health` reports `adapter_version`, `pid`, `port`, `passthrough` and
+  `upstream`, and `python muse_adapter.py --health <url>` queries it. An adapter that cannot answer
+  belongs to another process or to a plugin older than this release, which is what makes a stale
+  loopback port diagnosable.
+- Every relayed response carries `x-muse-adapter: <version>`.
+- A refused request (status 400 or above) logs one warning line with the method, path, upstream
+  status, adapter version, port and pid, and the rules that fired. No body and no credential.
+
 ## [0.6.4] - 2026-11-12
 
 ### Fixed

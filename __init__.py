@@ -126,11 +126,16 @@ def _adapter_base_url() -> str:
     imports and registrations reuse the same server. If no loopback port can be
     bound, keep the direct endpoint (the pre-0.6 behavior) and warn: only the
     exception type is logged, never credentials or payloads.
+
+    Called lazily, never at import: a short-lived process that only loads the
+    plugin (the admission probe, ``hermes plugins validate``, a linter) must not
+    bind a loopback port. Each process owns its adapter on the first free port,
+    so an adapter left behind by another process is never adopted as this one's.
     """
     if _start_adapter is None:
         return DEFAULT_BASE_URL
     try:
-        adapter = _start_adapter(log=logger.debug)
+        adapter = _start_adapter(log=logger.debug, error_log=logger.warning)
     except Exception as error:  # noqa: BLE001 - a bind failure must not break import
         logger.warning(
             "Muse Code wire adapter unavailable (%s); using %s directly",
@@ -151,14 +156,15 @@ def _refresh_base_url() -> None:
 def register(ctx) -> None:
     """PluginManager entry point (also required by `hermes plugins validate`).
 
-    Provider registration already happened at import; re-read the cache so
-    a login that completed after import is picked up, and retry the wire
-    adapter in case the first bind failed. Stdlib-only, so the admission probe
-    can run it in a bare interpreter.
+    Provider registration already happened at import; re-read the cache so a
+    login that completed after import is picked up. The wire adapter is started
+    on first use (``runtime_base_url``) rather than here: validation and
+    admission probes run this hook in a bare interpreter that then exits, and
+    an adapter started here would outlive the probe on a loopback port. Stdlib
+    only, so those probes can still run it.
     """
     if _HERMES_AVAILABLE:
         _ensure_subscription_key()
-        _refresh_base_url()
 
 
 # Meta Model API (Muse) wire vocabulary, vendored from Hermes core
@@ -254,10 +260,12 @@ if _HERMES_AVAILABLE:
 
             Runtime credential resolution only reads this hook, so without the
             override ``base_url`` is never consulted: requests go straight to
-            ``api.meta.ai`` and Meta answers 403. ``register()`` keeps
-            ``self.base_url`` on the adapter, or on the direct endpoint when the
-            adapter could not bind.
+            ``api.meta.ai`` and Meta answers 403. Resolution is also the first
+            moment the adapter is actually needed, so it starts here (idempotent
+            per process) instead of at import; ``self.base_url`` then holds that
+            adapter's URL, or the direct endpoint when no port could be bound.
             """
+            _refresh_base_url()
             return self.base_url or None
 
         def resolve_api_key_secret(self) -> tuple[str, str] | None:
@@ -287,6 +295,9 @@ if _HERMES_AVAILABLE:
             timeout: float = 8.0,
         ) -> list[str] | None:
             _ensure_subscription_key()
+            # Discovery is a GET, which the adapter relays untouched, and Meta
+            # serves /v1/models directly (verified with a subscription key), so
+            # it does not need the loopback hop or a port binding.
             live = super().fetch_models(
                 api_key=api_key, base_url=base_url, timeout=timeout
             )
@@ -320,9 +331,10 @@ if _HERMES_AVAILABLE:
         description="Muse chat models billed to the local Muse Code monthly login",
         signup_url="https://github.com/TheStreamCode/hermes-muse-code#login-once",
         env_vars=(ENV_VAR,),
-        # Loopback wire adapter in front of api.meta.ai; DEFAULT_BASE_URL when
-        # the adapter could not bind and the provider runs direct.
-        base_url=_adapter_base_url(),
+        # Loopback wire adapter in front of api.meta.ai; started on first
+        # resolution (see runtime_base_url), DEFAULT_BASE_URL until then or when
+        # no port could be bound and the provider runs direct.
+        base_url=DEFAULT_BASE_URL,
         auth_type="api_key",
         auth_handler=_auth_handler,
         classify_api_error=_classify_client_restriction,

@@ -104,6 +104,11 @@ MAX_BODY_BYTES = 32 * 1024 * 1024
 # Ports tried in order, so a persisted base URL stays stable across restarts.
 DEFAULT_PORTS = (43219, 43220, 43221, 43222)
 
+# Diagnostic endpoint. It answers before the relay rules, so a caller can tell
+# which adapter owns a port: this process' adapter, a stale one from an older
+# plugin, or something else entirely. Not part of the wire contract.
+HEALTH_PATH = "/__muse_adapter/health"
+
 _JsonRecord = dict[str, Any]
 
 
@@ -412,6 +417,7 @@ class _AdapterConfig:
     upstream: str
     passthrough: bool
     log: Callable[[str], None] | None
+    error_log: Callable[[str], None] | None = None
 
 
 class _AdapterServer(http.server.ThreadingHTTPServer):
@@ -443,6 +449,22 @@ def _log(config: _AdapterConfig, message: str) -> None:
         pass
 
 
+def _log_error(config: _AdapterConfig, message: str) -> None:
+    """Report a failed request at the host's warning level.
+
+    A refused request must be visible without the caller turning on debug
+    logging: Meta's errors reach the caller as a bare "authentication failed",
+    and this line is the only place that records the upstream status and which
+    adapter answered. It never carries request or response bodies.
+    """
+    if config.error_log is None:
+        return
+    try:
+        config.error_log(message)
+    except Exception:  # noqa: BLE001 - diagnostics must never break a request
+        pass
+
+
 class _AdapterHandler(http.server.BaseHTTPRequestHandler):
     """One proxied request: adapt the request, relay the answer, restore names."""
 
@@ -462,7 +484,33 @@ class _AdapterHandler(http.server.BaseHTTPRequestHandler):
         return True
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler naming
+        if urllib.parse.urlsplit(self.path).path == HEALTH_PATH:
+            self._serve_health()
+            return
         self._handle()
+
+    def _serve_health(self) -> None:
+        """Report which adapter this is, without touching upstream or credentials."""
+        config: _AdapterConfig = self.server.config  # type: ignore[attr-defined]
+        payload = json.dumps(
+            {
+                "adapter_version": ADAPTER_VERSION,
+                "pid": os.getpid(),
+                "port": int(self.server.server_address[1]),  # type: ignore[attr-defined]
+                "passthrough": config.passthrough,
+                "upstream": config.upstream,
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("x-muse-adapter", str(ADAPTER_VERSION))
+        self.end_headers()
+        try:
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler naming
         self._handle()
@@ -484,7 +532,7 @@ class _AdapterHandler(http.server.BaseHTTPRequestHandler):
             self.close_connection = True
         except Exception as error:  # noqa: BLE001 - one bad request must not kill the server
             config: _AdapterConfig = self.server.config  # type: ignore[attr-defined]
-            _log(config, f"muse-code adapter error: {type(error).__name__}: {error}")
+            _log_error(config, f"muse-code adapter error: {type(error).__name__}: {error}")
             if not self._headers_sent:
                 payload = json.dumps(_ADAPTER_ERROR).encode("utf-8")
                 try:
@@ -650,7 +698,18 @@ class _AdapterHandler(http.server.BaseHTTPRequestHandler):
             raw_headers = getattr(upstream, "headers", None)
             headers = raw_headers if raw_headers is not None else {}
             content_type = str(headers.get("content-type") or "").lower()
-            if notes:
+            if int(status) >= 400:
+                # One line per refused request, at warning level: the caller only
+                # sees the provider's generic message, so this is the record of
+                # which adapter answered and what upstream returned.
+                rules = ", ".join(notes) if notes else "no rule fired"
+                _log_error(
+                    config,
+                    f"muse-code adapter: {method} {pathname} {status}"
+                    f" | v{ADAPTER_VERSION} port={int(self.server.server_address[1])}"  # type: ignore[attr-defined]
+                    f" pid={os.getpid()} | {rules}",
+                )
+            elif notes:
                 _log(
                     config,
                     f"muse-code adapter: {method} {pathname} {status} | {', '.join(notes)}",
@@ -730,6 +789,9 @@ class _AdapterHandler(http.server.BaseHTTPRequestHandler):
         self._headers_sent = True
 
     def _write_upstream_headers(self, headers: Any) -> None:
+        # Identify the adapter on every relayed answer, so a captured response
+        # says whether the loopback hop happened and which version shaped it.
+        self.send_header("x-muse-adapter", str(ADAPTER_VERSION))
         for name, value in headers.items():
             if name.lower() in _RESPONSE_SKIP:
                 continue
@@ -831,6 +893,7 @@ def start_adapter(
     upstream: str | None = None,
     ports: Iterable[int] | None = None,
     log: Callable[[str], None] | None = None,
+    error_log: Callable[[str], None] | None = None,
     passthrough: bool | None = None,
 ) -> RunningAdapter:
     """Start the loopback adapter, or return the one already running.
@@ -840,6 +903,11 @@ def start_adapter(
     options returns the same running adapter, so repeated imports and plugin
     registrations never start a duplicate server; a call with different options
     stops the previous adapter and replaces it.
+
+    ``log`` receives the per-request diagnostic line; ``error_log`` receives the
+    same shape for refused requests and defaults to ``log``. Neither callback is
+    part of the identity key: an already-running adapter keeps the callbacks it
+    was started with.
 
     ``passthrough`` defaults to ``MUSE_CODE_ADAPTER=off``: the proxy stays in
     place, the wire rules are skipped.
@@ -861,6 +929,7 @@ def start_adapter(
             upstream=resolved_upstream,
             passthrough=resolved_passthrough,
             log=log,
+            error_log=error_log if error_log is not None else log,
         )
         server: _AdapterServer | None = None
         last_error: OSError | None = None
@@ -903,3 +972,46 @@ def stop_adapter() -> None:
         active = state.active
     if active is not None:
         active.close()
+
+
+def _main(argv: list[str]) -> int:
+    """Ask a listening adapter which build it is: ``--health <base_url|origin>``."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="muse_adapter",
+        description="Diagnostics for the local Muse Code wire adapter.",
+    )
+    parser.add_argument(
+        "--health",
+        metavar="URL",
+        help=f"query an adapter, e.g. http://127.0.0.1:43219/v1 (GET {HEALTH_PATH})",
+    )
+    args = parser.parse_args(argv)
+    if not args.health:
+        parser.print_help()
+        return 2
+
+    origin = args.health.strip().rstrip("/")
+    if origin.endswith("/v1"):
+        origin = origin[: -len("/v1")]
+    url = origin + HEALTH_PATH
+    try:
+        with urllib.request.urlopen(url, timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+            header = response.headers.get("x-muse-adapter")
+    except Exception as error:  # noqa: BLE001 - this command reports, it does not raise
+        print(
+            f"no Muse Code adapter answered at {url} ({type(error).__name__}: {error})",
+            file=sys.stderr,
+        )
+        return 1
+
+    if header is not None and str(payload.get("adapter_version")) != str(header):
+        payload["header_version"] = header
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main(sys.argv[1:]))
